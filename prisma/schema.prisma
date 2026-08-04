@@ -1,0 +1,52 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+enum TransactionType {
+  INCOME
+  EXPENSE
+}
+
+model BusinessArea {
+  id           String        @id @default(cuid())
+  name         String        @unique
+  description  String?
+  createdAt    DateTime      @default(now())
+  transactions Transaction[]
+}
+
+model Category {
+  id           String           @id @default(cuid())
+  name         String
+  type         TransactionType
+  createdAt    DateTime         @default(now())
+  transactions Transaction[]
+
+  @@unique([name, type])
+}
+
+model Transaction {
+  id             String           @id @default(cuid())
+  date           DateTime
+  amount         Float
+  type           TransactionType
+  description    String?
+  source         String           @default("MANUAL")
+  category       Category?        @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  categoryId     String?
+  businessArea   BusinessArea?    @relation(fields: [businessAreaId], references: [id], onDelete: SetNull)
+  businessAreaId String?
+  createdAt      DateTime         @default(now())
+
+  @@index([date])
+  @@index([categoryId])
+  @@index([businessAreaId])
+}
