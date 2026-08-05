@@ -30,6 +30,12 @@ export type Transaction = {
 
 export type BilagStatus = "MANGLER_BELOEB" | "BOGFOERT" | "IGNORERET";
 
+export type BilagAttachment = {
+  id: string;
+  filename: string;
+  contentType: string;
+};
+
 export type Bilag = {
   id: string;
   emailMessageId: string;
@@ -44,6 +50,7 @@ export type Bilag = {
   status: BilagStatus;
   transactionId: string | null;
   transaction: Transaction | null;
+  attachments: BilagAttachment[];
   createdAt: string;
 };
 

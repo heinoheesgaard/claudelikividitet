@@ -13,7 +13,10 @@ export async function GET(request: NextRequest) {
 
   const bilag = await prisma.bilag.findMany({
     where,
-    include: { transaction: { include: { category: true, businessArea: true } } },
+    include: {
+      transaction: { include: { category: true, businessArea: true } },
+      attachments: { select: { id: true, filename: true, contentType: true } },
+    },
     orderBy: { receivedAt: "desc" },
   });
 

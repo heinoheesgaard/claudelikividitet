@@ -170,10 +170,24 @@ function BilagRow({
             {formatDate(bilag.receivedAt)} · fra {bilag.senderEmail}
             {bilag.guessedVendor && ` · "${bilag.subject}"`}
           </p>
-          {attachmentNames.length > 0 && (
-            <p className="text-xs text-slate-400 mt-1">
-              📎 {attachmentNames.join(", ")}
+          {bilag.attachments.length > 0 ? (
+            <p className="text-xs mt-1 flex flex-wrap gap-2">
+              {bilag.attachments.map((a) => (
+                <a
+                  key={a.id}
+                  href={`/api/bilag/attachments/${a.id}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-blue-600 hover:underline"
+                >
+                  📎 {a.filename}
+                </a>
+              ))}
             </p>
+          ) : (
+            attachmentNames.length > 0 && (
+              <p className="text-xs text-slate-400 mt-1">📎 {attachmentNames.join(", ")}</p>
+            )
           )}
         </div>
         <StatusBadge status={bilag.status} />
