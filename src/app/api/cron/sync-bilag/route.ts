@@ -39,6 +39,24 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Ikke autoriseret." }, { status: 401 });
   }
 
+  if (request.nextUrl.searchParams.get("diag") === "1") {
+    const rawKey = process.env.GMAIL_SERVICE_ACCOUNT_PRIVATE_KEY ?? "";
+    const normalizedKey = rawKey.replace(/\\n/g, "\n");
+    return NextResponse.json({
+      clientEmail: process.env.GMAIL_SERVICE_ACCOUNT_EMAIL ?? null,
+      impersonateEmail: process.env.GMAIL_IMPERSONATE_EMAIL ?? null,
+      privateKeyRawLength: rawKey.length,
+      privateKeyNormalizedLength: normalizedKey.length,
+      privateKeyLineCount: normalizedKey.split("\n").length,
+      startsWithHeader: normalizedKey.startsWith("-----BEGIN PRIVATE KEY-----"),
+      endsWithFooter: normalizedKey.trimEnd().endsWith("-----END PRIVATE KEY-----"),
+      first40: normalizedKey.slice(0, 40),
+      last40: normalizedKey.slice(-40),
+      containsLiteralBackslashN: rawKey.includes("\\n"),
+      containsCarriageReturn: rawKey.includes("\r"),
+    });
+  }
+
   const recipient = process.env.GMAIL_IMPERSONATE_EMAIL;
   if (!recipient) {
     return NextResponse.json(
