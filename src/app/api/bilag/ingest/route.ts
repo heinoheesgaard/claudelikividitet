@@ -3,6 +3,18 @@ import { prisma } from "@/lib/prisma";
 import { bilagIngestSchema } from "@/lib/bilag-schema";
 
 export async function POST(request: NextRequest) {
+  const secret = process.env.BILAG_INGEST_TOKEN;
+  if (!secret) {
+    return NextResponse.json(
+      { error: "BILAG_INGEST_TOKEN er ikke konfigureret på serveren." },
+      { status: 500 },
+    );
+  }
+  const token = request.nextUrl.searchParams.get("token");
+  if (token !== secret) {
+    return NextResponse.json({ error: "Ugyldig eller manglende token." }, { status: 401 });
+  }
+
   const body = await request.json();
   const parsed = bilagIngestSchema.safeParse(body);
   if (!parsed.success) {
