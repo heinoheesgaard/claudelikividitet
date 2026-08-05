@@ -47,79 +47,85 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const gmail = getGmailClient();
+  try {
+    const gmail = getGmailClient();
 
-  const listRes = await gmail.users.messages.list({
-    userId: "me",
-    q: `to:${recipient} newer_than:3d`,
-    maxResults: 50,
-  });
-
-  const messages = listRes.data.messages ?? [];
-  let created = 0;
-  let skipped = 0;
-  let attachmentsTotal = 0;
-
-  for (const message of messages) {
-    if (!message.id) continue;
-
-    const msgRes = await gmail.users.messages.get({
+    const listRes = await gmail.users.messages.list({
       userId: "me",
-      id: message.id,
-      format: "full",
+      q: `to:${recipient} newer_than:3d`,
+      maxResults: 50,
     });
-    const msg = msgRes.data;
-    const payload = msg.payload;
-    if (!payload) continue;
 
-    const allParts = flattenParts(payload);
-    const emailMessageId = headerValue(payload.headers, "Message-Id") ?? message.id;
-    const senderEmail = headerValue(payload.headers, "From") ?? "ukendt";
-    const subject = headerValue(payload.headers, "Subject") ?? "";
-    const receivedAt = msg.internalDate ? new Date(Number(msg.internalDate)) : new Date();
-    const snippet = msg.snippet ?? null;
+    const messages = listRes.data.messages ?? [];
+    let created = 0;
+    let skipped = 0;
+    let attachmentsTotal = 0;
 
-    const attachments = [];
-    for (const part of allParts) {
-      if (part.filename && part.body?.attachmentId) {
-        const attRes = await gmail.users.messages.attachments.get({
-          userId: "me",
-          messageId: message.id,
-          id: part.body.attachmentId,
-        });
-        if (!attRes.data.data) continue;
+    for (const message of messages) {
+      if (!message.id) continue;
 
-        attachments.push({
-          filename: part.filename,
-          contentType: part.mimeType ?? "application/octet-stream",
-          data: decodeBase64Url(attRes.data.data),
-        });
+      const msgRes = await gmail.users.messages.get({
+        userId: "me",
+        id: message.id,
+        format: "full",
+      });
+      const msg = msgRes.data;
+      const payload = msg.payload;
+      if (!payload) continue;
+
+      const allParts = flattenParts(payload);
+      const emailMessageId = headerValue(payload.headers, "Message-Id") ?? message.id;
+      const senderEmail = headerValue(payload.headers, "From") ?? "ukendt";
+      const subject = headerValue(payload.headers, "Subject") ?? "";
+      const receivedAt = msg.internalDate ? new Date(Number(msg.internalDate)) : new Date();
+      const snippet = msg.snippet ?? null;
+
+      const attachments = [];
+      for (const part of allParts) {
+        if (part.filename && part.body?.attachmentId) {
+          const attRes = await gmail.users.messages.attachments.get({
+            userId: "me",
+            messageId: message.id,
+            id: part.body.attachmentId,
+          });
+          if (!attRes.data.data) continue;
+
+          attachments.push({
+            filename: part.filename,
+            contentType: part.mimeType ?? "application/octet-stream",
+            data: decodeBase64Url(attRes.data.data),
+          });
+        }
       }
+
+      const result = await storeBilag({
+        emailMessageId,
+        emailThreadId: msg.threadId ?? message.id,
+        receivedAt,
+        senderEmail,
+        subject,
+        snippet,
+        attachments,
+      });
+
+      if (result.skipped) {
+        skipped += 1;
+      } else {
+        created += 1;
+      }
+      attachmentsTotal += result.attachments;
     }
 
-    const result = await storeBilag({
-      emailMessageId,
-      emailThreadId: msg.threadId ?? message.id,
-      receivedAt,
-      senderEmail,
-      subject,
-      snippet,
-      attachments,
+    return NextResponse.json({
+      ok: true,
+      processed: messages.length,
+      created,
+      skipped,
+      attachments: attachmentsTotal,
     });
-
-    if (result.skipped) {
-      skipped += 1;
-    } else {
-      created += 1;
-    }
-    attachmentsTotal += result.attachments;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("sync-bilag failed", error);
+    return NextResponse.json({ ok: false, error: message }, { status: 500 });
   }
-
-  return NextResponse.json({
-    ok: true,
-    processed: messages.length,
-    created,
-    skipped,
-    attachments: attachmentsTotal,
-  });
 }
