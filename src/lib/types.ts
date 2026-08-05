@@ -28,6 +28,25 @@ export type Transaction = {
   createdAt: string;
 };
 
+export type BilagStatus = "MANGLER_BELOEB" | "BOGFOERT" | "IGNORERET";
+
+export type Bilag = {
+  id: string;
+  emailMessageId: string;
+  emailThreadId: string;
+  receivedAt: string;
+  senderEmail: string;
+  subject: string;
+  attachmentNames: string;
+  snippet: string | null;
+  guessedVendor: string | null;
+  guessedAmount: number | null;
+  status: BilagStatus;
+  transactionId: string | null;
+  transaction: Transaction | null;
+  createdAt: string;
+};
+
 export type Summary = {
   totals: { income: number; expense: number; profit: number };
   expensesByCategory: { name: string; total: number; count: number }[];

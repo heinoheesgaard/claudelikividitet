@@ -3,8 +3,8 @@ import "./globals.css";
 import Nav from "@/components/nav";
 
 export const metadata: Metadata = {
-  title: "Business Controller",
-  description: "Overblik over udgifter, indtjening og forretningsområder",
+  title: "Thypisk Julia",
+  description: "Overblik over udgifter, indtjening, forretningsområder og bilag",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

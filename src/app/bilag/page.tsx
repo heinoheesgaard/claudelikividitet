@@ -1,0 +1,303 @@
+"use client";
+
+import { useMemo, useState } from "react";
+import useSWR from "swr";
+import { fetcher, formatDKK, formatDate } from "@/lib/format";
+import type { Bilag, BilagStatus, BusinessArea, Category } from "@/lib/types";
+
+const TABS: { value: BilagStatus | "ALLE"; label: string }[] = [
+  { value: "MANGLER_BELOEB", label: "Mangler beløb" },
+  { value: "BOGFOERT", label: "Bogført" },
+  { value: "IGNORERET", label: "Ignoreret" },
+  { value: "ALLE", label: "Alle" },
+];
+
+export default function BilagPage() {
+  const [tab, setTab] = useState<BilagStatus | "ALLE">("MANGLER_BELOEB");
+  const query = tab === "ALLE" ? "" : `?status=${tab}`;
+
+  const { data: bilag, mutate, isLoading } = useSWR<Bilag[]>(`/api/bilag${query}`, fetcher);
+  const { data: categories } = useSWR<Category[]>("/api/categories", fetcher);
+  const { data: businessAreas } = useSWR<BusinessArea[]>("/api/business-areas", fetcher);
+
+  const counts = useCounts();
+
+  return (
+    <div className="flex flex-col gap-8">
+      <div>
+        <h1 className="text-2xl font-semibold text-slate-900">Bilag</h1>
+        <p className="text-slate-500 mt-1">
+          Alle bilag sendt til <span className="font-mono">revisorkurt@thypisk.dk</span> — dit
+          sikkerhedsnet mod bilag der forsvinder, uanset om economic kunne læse dem.
+        </p>
+      </div>
+
+      <div className="flex gap-2 border-b border-slate-200">
+        {TABS.map((t) => (
+          <button
+            key={t.value}
+            onClick={() => setTab(t.value)}
+            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${
+              tab === t.value
+                ? "border-slate-900 text-slate-900"
+                : "border-transparent text-slate-500 hover:text-slate-700"
+            }`}
+          >
+            {t.label}
+            {counts && t.value !== "ALLE" && (
+              <span className="ml-1.5 text-xs text-slate-400">({counts[t.value]})</span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {isLoading && <p className="text-sm text-slate-500">Indlæser…</p>}
+
+      <div className="flex flex-col gap-4">
+        {bilag?.map((b) => (
+          <BilagRow
+            key={b.id}
+            bilag={b}
+            categories={categories ?? []}
+            businessAreas={businessAreas ?? []}
+            onChanged={() => mutate()}
+          />
+        ))}
+        {bilag?.length === 0 && (
+          <p className="text-sm text-slate-500 py-8 text-center">Ingen bilag i denne visning.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function useCounts() {
+  const { data } = useSWR<Bilag[]>("/api/bilag", fetcher);
+  return useMemo(() => {
+    if (!data) return null;
+    return {
+      MANGLER_BELOEB: data.filter((b) => b.status === "MANGLER_BELOEB").length,
+      BOGFOERT: data.filter((b) => b.status === "BOGFOERT").length,
+      IGNORERET: data.filter((b) => b.status === "IGNORERET").length,
+    };
+  }, [data]);
+}
+
+function BilagRow({
+  bilag,
+  categories,
+  businessAreas,
+  onChanged,
+}: {
+  bilag: Bilag;
+  categories: Category[];
+  businessAreas: BusinessArea[];
+  onChanged: () => void;
+}) {
+  const attachmentNames: string[] = useMemo(() => {
+    try {
+      return JSON.parse(bilag.attachmentNames);
+    } catch {
+      return [];
+    }
+  }, [bilag.attachmentNames]);
+
+  const [amount, setAmount] = useState(bilag.guessedAmount ? String(bilag.guessedAmount) : "");
+  const [type, setType] = useState<"EXPENSE" | "INCOME">("EXPENSE");
+  const [categoryId, setCategoryId] = useState("");
+  const [businessAreaId, setBusinessAreaId] = useState("");
+  const [description, setDescription] = useState(bilag.guessedVendor ?? "");
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const categoriesForType = categories.filter((c) => c.type === type);
+
+  async function confirm() {
+    const numericAmount = Number(amount);
+    if (!numericAmount || numericAmount <= 0) {
+      setError("Udfyld et beløb større end 0.");
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    const res = await fetch(`/api/bilag/${bilag.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "confirm",
+        amount: numericAmount,
+        type,
+        description: description || undefined,
+        categoryId: categoryId || null,
+        businessAreaId: businessAreaId || null,
+      }),
+    });
+    setSubmitting(false);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      setError(body.error ?? "Kunne ikke bogføre bilaget.");
+      return;
+    }
+    onChanged();
+  }
+
+  async function ignore() {
+    await fetch(`/api/bilag/${bilag.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "ignore" }),
+    });
+    onChanged();
+  }
+
+  async function reset() {
+    await fetch(`/api/bilag/${bilag.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "reset" }),
+    });
+    onChanged();
+  }
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-lg p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-3">
+        <div>
+          <p className="text-sm font-medium text-slate-900">
+            {bilag.guessedVendor ?? bilag.subject}
+          </p>
+          <p className="text-xs text-slate-500 mt-0.5">
+            {formatDate(bilag.receivedAt)} · fra {bilag.senderEmail}
+            {bilag.guessedVendor && ` · "${bilag.subject}"`}
+          </p>
+          {attachmentNames.length > 0 && (
+            <p className="text-xs text-slate-400 mt-1">
+              📎 {attachmentNames.join(", ")}
+            </p>
+          )}
+        </div>
+        <StatusBadge status={bilag.status} />
+      </div>
+
+      {bilag.status === "MANGLER_BELOEB" && (
+        <div className="flex flex-wrap items-end gap-2 pt-3 border-t border-slate-100">
+          <label className="flex flex-col gap-1 text-xs">
+            <span className="text-slate-500">Type</span>
+            <select
+              value={type}
+              onChange={(e) => setType(e.target.value as "EXPENSE" | "INCOME")}
+              className="border border-slate-300 rounded-md px-2 py-1.5 text-sm"
+            >
+              <option value="EXPENSE">Udgift</option>
+              <option value="INCOME">Indtægt</option>
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-xs">
+            <span className="text-slate-500">Beløb (DKK)</span>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              className="border border-slate-300 rounded-md px-2 py-1.5 text-sm w-28"
+              placeholder="0,00"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-xs">
+            <span className="text-slate-500">Kategori</span>
+            <select
+              value={categoryId}
+              onChange={(e) => setCategoryId(e.target.value)}
+              className="border border-slate-300 rounded-md px-2 py-1.5 text-sm"
+            >
+              <option value="">Ingen</option>
+              {categoriesForType.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-xs">
+            <span className="text-slate-500">Forretningsområde</span>
+            <select
+              value={businessAreaId}
+              onChange={(e) => setBusinessAreaId(e.target.value)}
+              className="border border-slate-300 rounded-md px-2 py-1.5 text-sm"
+            >
+              <option value="">Ingen</option>
+              {businessAreas.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-xs flex-1 min-w-[140px]">
+            <span className="text-slate-500">Beskrivelse</span>
+            <input
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              className="border border-slate-300 rounded-md px-2 py-1.5 text-sm"
+              placeholder="Leverandør / note"
+            />
+          </label>
+          <button
+            onClick={confirm}
+            disabled={submitting}
+            className="bg-slate-900 text-white rounded-md px-3 py-1.5 text-sm font-medium disabled:opacity-50"
+          >
+            Bogfør
+          </button>
+          <button
+            onClick={ignore}
+            className="text-sm text-slate-500 hover:text-slate-800 px-2 py-1.5"
+          >
+            Ignorér
+          </button>
+        </div>
+      )}
+      {error && <p className="text-sm text-red-600 mt-2">{error}</p>}
+
+      {bilag.status === "BOGFOERT" && bilag.transaction && (
+        <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-sm">
+          <span className="text-slate-600">
+            Bogført som {bilag.transaction.type === "INCOME" ? "indtægt" : "udgift"}:{" "}
+            <span className="font-medium text-slate-900">
+              {formatDKK(bilag.transaction.amount)}
+            </span>
+            {bilag.transaction.category && ` · ${bilag.transaction.category.name}`}
+            {bilag.transaction.businessArea && ` · ${bilag.transaction.businessArea.name}`}
+          </span>
+        </div>
+      )}
+
+      {bilag.status === "IGNORERET" && (
+        <div className="pt-3 border-t border-slate-100">
+          <button onClick={reset} className="text-sm text-slate-600 hover:text-slate-900">
+            Fortryd (sæt tilbage til &quot;mangler beløb&quot;)
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StatusBadge({ status }: { status: BilagStatus }) {
+  const styles: Record<BilagStatus, string> = {
+    MANGLER_BELOEB: "bg-amber-50 text-amber-700",
+    BOGFOERT: "bg-emerald-50 text-emerald-700",
+    IGNORERET: "bg-slate-100 text-slate-500",
+  };
+  const labels: Record<BilagStatus, string> = {
+    MANGLER_BELOEB: "Mangler beløb",
+    BOGFOERT: "Bogført",
+    IGNORERET: "Ignoreret",
+  };
+  return (
+    <span className={`text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap ${styles[status]}`}>
+      {labels[status]}
+    </span>
+  );
+}

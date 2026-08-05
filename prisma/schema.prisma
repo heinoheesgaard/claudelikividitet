@@ -15,6 +15,12 @@ enum TransactionType {
   EXPENSE
 }
 
+enum BilagStatus {
+  MANGLER_BELOEB
+  BOGFOERT
+  IGNORERET
+}
+
 model BusinessArea {
   id           String        @id @default(cuid())
   name         String        @unique
@@ -44,9 +50,30 @@ model Transaction {
   categoryId     String?
   businessArea   BusinessArea?    @relation(fields: [businessAreaId], references: [id], onDelete: SetNull)
   businessAreaId String?
+  bilag          Bilag?
   createdAt      DateTime         @default(now())
 
   @@index([date])
   @@index([categoryId])
   @@index([businessAreaId])
+}
+
+model Bilag {
+  id                String      @id @default(cuid())
+  emailMessageId    String      @unique
+  emailThreadId     String
+  receivedAt        DateTime
+  senderEmail       String
+  subject           String
+  attachmentNames   String
+  snippet           String?
+  guessedVendor     String?
+  guessedAmount     Float?
+  status            BilagStatus @default(MANGLER_BELOEB)
+  transaction       Transaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+  transactionId     String?      @unique
+  createdAt         DateTime    @default(now())
+
+  @@index([status])
+  @@index([receivedAt])
 }

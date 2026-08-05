@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 const links = [
   { href: "/", label: "Dashboard" },
   { href: "/transaktioner", label: "Transaktioner" },
+  { href: "/bilag", label: "Bilag" },
   { href: "/import", label: "Importér" },
   { href: "/indstillinger", label: "Indstillinger" },
 ];
@@ -16,7 +17,7 @@ export default function Nav() {
   return (
     <header className="border-b border-slate-200 bg-white">
       <div className="max-w-6xl mx-auto px-4 flex items-center justify-between h-14">
-        <span className="font-semibold text-slate-900">Business Controller</span>
+        <span className="font-semibold text-slate-900">Thypisk Julia</span>
         <nav className="flex gap-1">
           {links.map((link) => {
             const active = pathname === link.href;
