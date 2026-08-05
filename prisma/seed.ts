@@ -22,7 +22,7 @@ const expenseCategories = [
 
 const incomeCategories = ["Salg af varer", "Salg af ydelser", "Abonnementsindtægt", "Andet"];
 
-const businessAreas = ["Produkt A", "Produkt B", "Konsulentydelser", "Fælles/admin"];
+const businessAreas = ["Organisation", "Vorupør", "Markedshallen", "Festival & Events"];
 
 async function main() {
   for (const name of expenseCategories) {
