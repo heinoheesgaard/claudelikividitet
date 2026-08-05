@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 
 const links = [
   { href: "/", label: "Dashboard" },
+  { href: "/resultatopgorelse", label: "Resultatopgørelse" },
   { href: "/transaktioner", label: "Transaktioner" },
   { href: "/bilag", label: "Bilag" },
   { href: "/import", label: "Importér" },
