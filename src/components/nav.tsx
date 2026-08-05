@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 
 const links = [
   { href: "/", label: "Dashboard" },
@@ -13,12 +13,21 @@ const links = [
 
 export default function Nav() {
   const pathname = usePathname();
+  const router = useRouter();
+
+  if (pathname === "/login") return null;
+
+  async function logout() {
+    await fetch("/api/logout", { method: "POST" });
+    router.push("/login");
+    router.refresh();
+  }
 
   return (
     <header className="border-b border-slate-200 bg-white">
       <div className="max-w-6xl mx-auto px-4 flex items-center justify-between h-14">
         <span className="font-semibold text-slate-900">Thypisk Julia</span>
-        <nav className="flex gap-1">
+        <nav className="flex gap-1 items-center">
           {links.map((link) => {
             const active = pathname === link.href;
             return (
@@ -35,6 +44,12 @@ export default function Nav() {
               </Link>
             );
           })}
+          <button
+            onClick={logout}
+            className="px-3 py-2 rounded-md text-sm font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+          >
+            Log ud
+          </button>
         </nav>
       </div>
     </header>
