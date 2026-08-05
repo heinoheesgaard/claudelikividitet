@@ -90,3 +90,12 @@ model BilagAttachment {
 
   @@index([bilagId])
 }
+
+model LoginAttempt {
+  id          String   @id @default(cuid())
+  ipAddress   String
+  success     Boolean
+  createdAt   DateTime @default(now())
+
+  @@index([ipAddress, createdAt])
+}
