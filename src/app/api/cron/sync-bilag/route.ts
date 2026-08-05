@@ -40,9 +40,30 @@ export async function GET(request: NextRequest) {
   }
 
   if (request.nextUrl.searchParams.get("diag") === "1") {
+    const crypto = await import("node:crypto");
     const rawKey = process.env.GMAIL_SERVICE_ACCOUNT_PRIVATE_KEY ?? "";
-    const normalizedKey = rawKey.replace(/\\n/g, "\n");
+    const normalizedKey = rawKey.replace(/\\n/g, "\n").trim();
+
+    let parseResult: { ok: true } | { ok: false; error: string };
+    try {
+      crypto.createPrivateKey(normalizedKey);
+      parseResult = { ok: true };
+    } catch (error) {
+      parseResult = { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+
+    let signResult: { ok: true } | { ok: false; error: string };
+    try {
+      const signer = crypto.createSign("RSA-SHA256");
+      signer.update("test");
+      signer.sign(normalizedKey);
+      signResult = { ok: true };
+    } catch (error) {
+      signResult = { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+
     return NextResponse.json({
+      nodeVersion: process.version,
       clientEmail: process.env.GMAIL_SERVICE_ACCOUNT_EMAIL ?? null,
       impersonateEmail: process.env.GMAIL_IMPERSONATE_EMAIL ?? null,
       privateKeyRawLength: rawKey.length,
@@ -54,6 +75,8 @@ export async function GET(request: NextRequest) {
       last40: normalizedKey.slice(-40),
       containsLiteralBackslashN: rawKey.includes("\\n"),
       containsCarriageReturn: rawKey.includes("\r"),
+      createPrivateKeyResult: parseResult,
+      cryptoSignResult: signResult,
     });
   }
 
