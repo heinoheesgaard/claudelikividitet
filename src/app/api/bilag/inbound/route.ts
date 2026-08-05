@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { storeBilag } from "@/lib/bilag-store";
 
 type MailjetPart = {
   Headers?: Record<string, unknown>;
@@ -86,11 +86,6 @@ export async function POST(request: NextRequest) {
   const emailMessageId =
     messageIdHeader ?? `mailjet:${crypto.createHash("sha256").update(rawBody).digest("hex")}`;
 
-  const existing = await prisma.bilag.findUnique({ where: { emailMessageId } });
-  if (existing) {
-    return NextResponse.json({ ok: true, skipped: true, bilagId: existing.id });
-  }
-
   const senderEmail = payload.Sender ?? payload.From ?? "ukendt";
   const subject = payload.Subject ?? "";
   const receivedAt = parseMailjetDate(payload.Date);
@@ -116,20 +111,15 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  const bilag = await prisma.bilag.create({
-    data: {
-      emailMessageId,
-      emailThreadId: emailMessageId,
-      receivedAt,
-      senderEmail,
-      subject,
-      attachmentNames: JSON.stringify(attachments.map((a) => a.filename)),
-      snippet,
-      attachments: {
-        create: attachments,
-      },
-    },
+  const result = await storeBilag({
+    emailMessageId,
+    emailThreadId: emailMessageId,
+    receivedAt,
+    senderEmail,
+    subject,
+    snippet,
+    attachments,
   });
 
-  return NextResponse.json({ ok: true, bilagId: bilag.id, attachments: attachments.length });
+  return NextResponse.json({ ok: true, ...result });
 }
