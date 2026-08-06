@@ -1,8 +1,23 @@
 import "server-only";
 import { extractText } from "unpdf";
 
-const AMOUNT_LABEL_RE =
-  /(i alt|samlet beløb|total|at betale|beløb|sum)[^\d\n]{0,20}(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2})\s*(?:kr|dkk)?/gi;
+// Ordered strongest-first: a document can mention several "total-ish" labels
+// (subtotal, VAT total, grand total) — the strong tier is only for labels
+// that specifically mean "this is the final amount", so we don't need to
+// pick a number out of several equally-weighted candidates.
+const STRONG_LABELS = [
+  "i alt",
+  "totalbeløb",
+  "total beløb",
+  "samlet beløb",
+  "beløb at betale",
+  "at betale",
+  "grand total",
+  "amount due",
+  "total amount",
+  "total",
+];
+const WEAK_LABELS = ["beløb", "sum"];
 const AMOUNT_ANY_RE = /(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2})\s*(?:kr\.?|dkk)/gi;
 const DATE_RE = /\b(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})\b/g;
 
@@ -10,12 +25,36 @@ function parseDanishAmount(raw: string): number {
   return Number(raw.replace(/\./g, "").replace(",", "."));
 }
 
+function findLabeledAmounts(text: string, labels: string[]): number[] {
+  // The gap between label and number is allowed to cross line breaks, since
+  // PDF table layouts often put the label and its value on separate lines.
+  const pattern = new RegExp(
+    `(${labels.map((l) => l.replace(/\s+/g, "\\s+")).join("|")})[^\\d]{0,40}(\\d{1,3}(?:\\.\\d{3})*,\\d{2}|\\d+,\\d{2})`,
+    "gi",
+  );
+  const amounts: number[] = [];
+  for (const m of text.matchAll(pattern)) {
+    const start = m.index ?? 0;
+    const precedingContext = text.slice(Math.max(0, start - 15), start).toLowerCase();
+    if (precedingContext.includes("moms")) continue; // skip VAT-only subtotals
+    const amount = parseDanishAmount(m[2]);
+    if (Number.isFinite(amount) && amount > 0) amounts.push(amount);
+  }
+  return amounts;
+}
+
 function guessAmountFromText(text: string): number | null {
-  const labelMatches = [...text.matchAll(AMOUNT_LABEL_RE)]
-    .map((m) => parseDanishAmount(m[2]))
-    .filter((n) => Number.isFinite(n) && n > 0);
-  if (labelMatches.length > 0) {
-    return Math.max(...labelMatches);
+  // The final total is usually the last "strong" label mentioned in reading
+  // order (it comes after any subtotal/VAT lines), not necessarily the
+  // largest number on the page.
+  const strong = findLabeledAmounts(text, STRONG_LABELS);
+  if (strong.length > 0) {
+    return strong[strong.length - 1];
+  }
+
+  const weak = findLabeledAmounts(text, WEAK_LABELS);
+  if (weak.length > 0) {
+    return Math.max(...weak);
   }
 
   const anyMatches = [...text.matchAll(AMOUNT_ANY_RE)]

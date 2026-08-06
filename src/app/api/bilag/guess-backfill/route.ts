@@ -11,7 +11,7 @@ export async function POST(request: NextRequest) {
   const cursor: string | undefined = typeof body.cursor === "string" ? body.cursor : undefined;
 
   const candidates = await prisma.bilag.findMany({
-    where: { guessedAmount: null, status: "MANGLER_BELOEB" },
+    where: { status: "MANGLER_BELOEB" },
     orderBy: { id: "asc" },
     take: BATCH_SIZE,
     ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),

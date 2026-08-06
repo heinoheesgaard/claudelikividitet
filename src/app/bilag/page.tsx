@@ -198,7 +198,9 @@ function GuessBackfillButton({ onDone }: { onDone: () => void }) {
   return (
     <div className="bg-white border border-slate-200 rounded-lg p-4 flex flex-col gap-2 min-w-[260px]">
       <div className="flex items-center gap-2">
-        <span className="text-xs text-slate-500">Eksisterende bilag uden beløb/leverandør</span>
+        <span className="text-xs text-slate-500">
+          Genkør gæt af beløb/leverandør på alle ubogførte bilag
+        </span>
         <button
           onClick={run}
           disabled={running}
