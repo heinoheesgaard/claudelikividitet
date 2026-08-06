@@ -32,34 +32,67 @@ function parseDanishAmount(raw: string): number {
   return Number(raw.replace(/\./g, "").replace(",", "."));
 }
 
-function findLabeledAmounts(text: string, labels: string[]): number[] {
-  // The gap between label and number is allowed to cross line breaks, since
-  // PDF table layouts often put the label and its value on separate lines.
-  // \b boundaries stop "total" from matching inside "subtotal", or "beløb"
-  // inside "nettobeløb".
-  const pattern = new RegExp(
-    `\\b(${labels.map((l) => l.replace(/\s+/g, "\\s+")).join("|")})\\b([^\\d]{0,40})(\\d{1,3}(?:\\.\\d{3})*,\\d{2}|\\d+,\\d{2})(\\s*%)?`,
-    "gi",
-  );
+// Matches a money amount, but reports (via group 2) whether it's actually a
+// percentage ("25,00 %") so callers can exclude VAT rates.
+const LINE_AMOUNT_RE = /(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2})(\s*%)?/g;
+
+function extractLineAmounts(line: string): number[] {
   const amounts: number[] = [];
-  for (const m of text.matchAll(pattern)) {
-    if (m[4]) continue; // "moms 25,00 %" is a VAT rate, not a money amount
-
-    const start = m.index ?? 0;
-    const gapText = m[2].toLowerCase();
-    // Only look back as far as the start of the current line — a "Moms 25%"
-    // line almost always sits directly above the real "I alt" total, so
-    // scanning across the line break would wrongly disqualify it every time.
-    const lineStart = text.lastIndexOf("\n", start - 1) + 1;
-    const precedingContext = text.slice(lineStart, start).toLowerCase();
-    // Skip VAT lines ("moms", "heraf moms") and subtotals ("ekskl. moms",
-    // "excl. vat") — only the VAT-inclusive grand total should count.
-    if (precedingContext.includes("moms") || gapText.includes("moms")) continue;
-    if (/eks(kl)?\.?\s*moms|excl/.test(precedingContext)) continue;
-
-    const amount = parseDanishAmount(m[3]);
+  for (const m of line.matchAll(LINE_AMOUNT_RE)) {
+    if (m[2]) continue; // a percentage, e.g. a VAT rate — not a money amount
+    const amount = parseDanishAmount(m[1]);
     if (Number.isFinite(amount) && amount > 0) amounts.push(amount);
   }
+  return amounts;
+}
+
+function findLabeledAmounts(text: string, labels: string[]): number[] {
+  // \b boundaries stop "total" from matching inside "subtotal", or "beløb"
+  // inside "nettobeløb".
+  const labelPattern = new RegExp(
+    `\\b(${labels.map((l) => l.replace(/\s+/g, "\\s+")).join("|")})\\b`,
+    "i",
+  );
+
+  const lines = text.split("\n");
+  const amounts: number[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const labelMatch = labelPattern.exec(line);
+    if (!labelMatch) continue;
+
+    // Only check right around this specific label — a table header row can
+    // legitimately list "Moms" and "MomsBeløb" as *other* columns next to
+    // "Total beløb", and that shouldn't disqualify the total column.
+    const localStart = Math.max(0, labelMatch.index - 10);
+    const localEnd = labelMatch.index + labelMatch[0].length + 10;
+    const localContext = line.slice(localStart, localEnd).toLowerCase();
+    // Skip VAT lines ("moms", "heraf moms") and subtotals ("ekskl. moms",
+    // "excl. vat") — only the VAT-inclusive grand total should count.
+    if (localContext.includes("moms") || /eks(kl)?\.?\s*moms|excl/.test(localContext)) continue;
+
+    // Same-line form: "I alt   1.250,00" or "I alt: 1.250,00 kr".
+    const afterLabel = line.slice(labelMatch.index + labelMatch[0].length);
+    const sameLineAmounts = extractLineAmounts(afterLabel);
+    if (sameLineAmounts.length > 0) {
+      amounts.push(sameLineAmounts[sameLineAmounts.length - 1]);
+      continue;
+    }
+
+    // Table form: the label is a column header ("Vare beløb  Moms  ...
+    // Total beløb") with no number of its own — the values sit on the row
+    // below, in the same left-to-right column order, so "Total beløb"
+    // being the last header means its value is the last amount on that row.
+    for (let j = i + 1; j <= Math.min(i + 2, lines.length - 1); j++) {
+      const rowAmounts = extractLineAmounts(lines[j]);
+      if (rowAmounts.length > 0) {
+        amounts.push(rowAmounts[rowAmounts.length - 1]);
+        break;
+      }
+    }
+  }
+
   return amounts;
 }
 
