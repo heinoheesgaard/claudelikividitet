@@ -1,5 +1,6 @@
 import "server-only";
 import { extractText } from "unpdf";
+import { createWorker, type Worker as TesseractWorker } from "tesseract.js";
 
 // A classic Danish invoice's totals section reads, in this order:
 //   Beløb ekskl. moms (subtotal)  ->  Moms 25% (VAT, almost always a flat
@@ -178,42 +179,86 @@ function guessDateFromText(text: string): Date | null {
   return null;
 }
 
-export async function guessInvoiceDetails(
-  attachments: { filename: string; contentType: string; data: Uint8Array<ArrayBuffer> }[],
-): Promise<{
+type GuessedDetails = {
   guessedAmount: number | null;
   guessedCurrency: string | null;
   guessedVendor: string | null;
   guessedInvoiceDate: Date | null;
-}> {
-  const empty = {
-    guessedAmount: null,
-    guessedCurrency: null,
-    guessedVendor: null,
-    guessedInvoiceDate: null,
+};
+
+const EMPTY_GUESS: GuessedDetails = {
+  guessedAmount: null,
+  guessedCurrency: null,
+  guessedVendor: null,
+  guessedInvoiceDate: null,
+};
+
+function buildGuessFromText(text: string): GuessedDetails {
+  const amountMatch = guessAmountFromText(text);
+  return {
+    // No currency symbol found near the number almost always means it's a
+    // plain Danish invoice (kr is often implied, not spelled out in every
+    // table cell) — default to DKK rather than leaving it unknown.
+    guessedAmount: amountMatch?.amount ?? null,
+    guessedCurrency: amountMatch ? amountMatch.currency ?? "DKK" : null,
+    guessedVendor: guessVendorFromText(text),
+    guessedInvoiceDate: guessDateFromText(text),
   };
+}
+
+// Reused across calls (and across warm serverless invocations) so we only
+// pay Tesseract's startup + language-download cost once per instance,
+// instead of once per receipt photo.
+let ocrWorkerPromise: Promise<TesseractWorker> | null = null;
+
+function getOcrWorker(): Promise<TesseractWorker> {
+  if (!ocrWorkerPromise) {
+    ocrWorkerPromise = createWorker("dan+eng");
+  }
+  return ocrWorkerPromise;
+}
+
+async function ocrImageText(data: Uint8Array): Promise<string> {
+  const worker = await getOcrWorker();
+  const {
+    data: { text },
+  } = await worker.recognize(Buffer.from(data));
+  return text;
+}
+
+const IMAGE_EXTENSIONS = /\.(jpe?g|png|webp|gif|bmp|tiff?)$/i;
+
+export async function guessInvoiceDetails(
+  attachments: { filename: string; contentType: string; data: Uint8Array<ArrayBuffer> }[],
+): Promise<GuessedDetails> {
   const pdf = attachments.find(
     (a) => a.contentType === "application/pdf" || a.filename.toLowerCase().endsWith(".pdf"),
   );
-  if (!pdf) return empty;
-
-  try {
-    // extractText detaches/transfers the underlying buffer it's given, so hand
-    // it an independent copy — the original bytes still need to be written to
-    // the database unmodified after this runs.
-    const { text } = await extractText(pdf.data.slice(), { mergePages: true });
-    const amountMatch = guessAmountFromText(text);
-    return {
-      // No currency symbol found near the number almost always means it's a
-      // plain Danish invoice (kr is often implied, not spelled out in every
-      // table cell) — default to DKK rather than leaving it unknown.
-      guessedAmount: amountMatch?.amount ?? null,
-      guessedCurrency: amountMatch ? amountMatch.currency ?? "DKK" : null,
-      guessedVendor: guessVendorFromText(text),
-      guessedInvoiceDate: guessDateFromText(text),
-    };
-  } catch (error) {
-    console.error("Could not extract invoice details from PDF", error);
-    return empty;
+  if (pdf) {
+    try {
+      // extractText detaches/transfers the underlying buffer it's given, so
+      // hand it an independent copy — the original bytes still need to be
+      // written to the database unmodified after this runs.
+      const { text } = await extractText(pdf.data.slice(), { mergePages: true });
+      return buildGuessFromText(text);
+    } catch (error) {
+      console.error("Could not extract invoice details from PDF", error);
+      return EMPTY_GUESS;
+    }
   }
+
+  const image = attachments.find(
+    (a) => a.contentType.startsWith("image/") || IMAGE_EXTENSIONS.test(a.filename),
+  );
+  if (image) {
+    try {
+      const text = await ocrImageText(image.data);
+      return buildGuessFromText(text);
+    } catch (error) {
+      console.error("Could not OCR invoice image", error);
+      return EMPTY_GUESS;
+    }
+  }
+
+  return EMPTY_GUESS;
 }
