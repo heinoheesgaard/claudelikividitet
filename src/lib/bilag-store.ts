@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { guessInvoiceDetails } from "@/lib/invoice-guess";
 
 export type NormalizedAttachment = {
   filename: string;
@@ -24,6 +25,8 @@ export async function storeBilag(input: NormalizedBilag) {
     return { bilagId: existing.id, skipped: true, attachments: 0 };
   }
 
+  const { guessedAmount, guessedVendor } = await guessInvoiceDetails(input.attachments);
+
   const bilag = await prisma.bilag.create({
     data: {
       emailMessageId: input.emailMessageId,
@@ -33,6 +36,8 @@ export async function storeBilag(input: NormalizedBilag) {
       subject: input.subject,
       attachmentNames: JSON.stringify(input.attachments.map((a) => a.filename)),
       snippet: input.snippet,
+      guessedAmount,
+      guessedVendor,
       attachments: {
         create: input.attachments,
       },

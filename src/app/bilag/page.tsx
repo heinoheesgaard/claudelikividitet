@@ -284,14 +284,18 @@ function BilagRow({
             </select>
           </label>
           <label className="flex flex-col gap-1 text-xs">
-            <span className="text-slate-500">Beløb (DKK)</span>
+            <span className="text-slate-500">
+              Beløb (DKK){bilag.guessedAmount != null && " · gættet, tjek det"}
+            </span>
             <input
               type="number"
               step="0.01"
               min="0"
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
-              className="border border-slate-300 rounded-md px-2 py-1.5 text-sm w-28"
+              className={`border rounded-md px-2 py-1.5 text-sm w-28 ${
+                bilag.guessedAmount != null ? "border-amber-300 bg-amber-50" : "border-slate-300"
+              }`}
               placeholder="0,00"
             />
           </label>
@@ -326,11 +330,15 @@ function BilagRow({
             </select>
           </label>
           <label className="flex flex-col gap-1 text-xs flex-1 min-w-[140px]">
-            <span className="text-slate-500">Beskrivelse</span>
+            <span className="text-slate-500">
+              Beskrivelse{bilag.guessedVendor && " · gættet, tjek det"}
+            </span>
             <input
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              className="border border-slate-300 rounded-md px-2 py-1.5 text-sm"
+              className={`border rounded-md px-2 py-1.5 text-sm ${
+                bilag.guessedVendor ? "border-amber-300 bg-amber-50" : "border-slate-300"
+              }`}
               placeholder="Leverandør / note"
             />
           </label>
