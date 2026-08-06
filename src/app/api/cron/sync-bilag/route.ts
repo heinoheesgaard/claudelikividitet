@@ -47,13 +47,17 @@ export async function GET(request: NextRequest) {
     );
   }
 
+  const days = Number(request.nextUrl.searchParams.get("days") ?? "3") || 3;
+  const pageToken = request.nextUrl.searchParams.get("pageToken") ?? undefined;
+
   try {
     const gmail = getGmailClient();
 
     const listRes = await gmail.users.messages.list({
       userId: "me",
-      q: `to:${recipient} newer_than:3d`,
-      maxResults: 50,
+      q: `to:${recipient} newer_than:${days}d`,
+      maxResults: 100,
+      pageToken,
     });
 
     const messages = listRes.data.messages ?? [];
@@ -122,6 +126,7 @@ export async function GET(request: NextRequest) {
       created,
       skipped,
       attachments: attachmentsTotal,
+      nextPageToken: listRes.data.nextPageToken ?? null,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
