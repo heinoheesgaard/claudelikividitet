@@ -24,12 +24,15 @@ export default function BilagPage() {
 
   return (
     <div className="flex flex-col gap-8">
-      <div>
-        <h1 className="text-2xl font-semibold text-slate-900">Bilag</h1>
-        <p className="text-slate-500 mt-1">
-          Alle bilag sendt til <span className="font-mono">revisorkurt@thypisk.dk</span> — dit
-          sikkerhedsnet mod bilag der forsvinder, uanset om economic kunne læse dem.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold text-slate-900">Bilag</h1>
+          <p className="text-slate-500 mt-1">
+            Alle bilag sendt til <span className="font-mono">revisorkurt@thypisk.dk</span> — dit
+            sikkerhedsnet mod bilag der forsvinder, uanset om economic kunne læse dem.
+          </p>
+        </div>
+        <FetchBilagButton onDone={() => mutate()} />
       </div>
 
       <div className="flex gap-2 border-b border-slate-200">
@@ -67,6 +70,80 @@ export default function BilagPage() {
           <p className="text-sm text-slate-500 py-8 text-center">Ingen bilag i denne visning.</p>
         )}
       </div>
+    </div>
+  );
+}
+
+function FetchBilagButton({ onDone }: { onDone: () => void }) {
+  const [days, setDays] = useState("14");
+  const [running, setRunning] = useState(false);
+  const [progress, setProgress] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function run() {
+    setRunning(true);
+    setError(null);
+    setProgress("Henter…");
+
+    let pageToken: string | undefined;
+    let totalCreated = 0;
+    let totalProcessed = 0;
+
+    try {
+      while (true) {
+        const res = await fetch("/api/bilag/sync", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ days: Number(days) || 14, pageToken }),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          setError(body.error ?? "Kunne ikke hente bilag.");
+          break;
+        }
+        const body = await res.json();
+        totalCreated += body.created;
+        totalProcessed += body.processed;
+        setProgress(`${totalProcessed} mails gennemgået, ${totalCreated} nye bilag fundet…`);
+        onDone();
+
+        if (!body.nextPageToken) {
+          setProgress(`Færdig — ${totalProcessed} mails gennemgået, ${totalCreated} nye bilag fundet.`);
+          break;
+        }
+        pageToken = body.nextPageToken;
+      }
+    } catch {
+      setError("Der skete en fejl under hentning.");
+    }
+    setRunning(false);
+  }
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-lg p-4 flex flex-col gap-2 min-w-[260px]">
+      <div className="flex items-center gap-2">
+        <label className="text-xs text-slate-500 flex items-center gap-1">
+          Kig
+          <input
+            type="number"
+            min={1}
+            max={400}
+            value={days}
+            onChange={(e) => setDays(e.target.value)}
+            className="border border-slate-300 rounded-md px-2 py-1 w-16 text-sm"
+          />
+          dage tilbage
+        </label>
+        <button
+          onClick={run}
+          disabled={running}
+          className="bg-slate-900 text-white rounded-md px-3 py-1.5 text-sm font-medium disabled:opacity-50"
+        >
+          {running ? "Henter…" : "Hent bilag nu"}
+        </button>
+      </div>
+      {progress && <p className="text-xs text-slate-500">{progress}</p>}
+      {error && <p className="text-xs text-red-600">{error}</p>}
     </div>
   );
 }
