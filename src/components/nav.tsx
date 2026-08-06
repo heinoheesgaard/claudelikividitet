@@ -8,6 +8,7 @@ const links = [
   { href: "/resultatopgorelse", label: "Resultatopgørelse" },
   { href: "/transaktioner", label: "Transaktioner" },
   { href: "/bilag", label: "Bilag" },
+  { href: "/bilag-afstemning", label: "Afstemning" },
   { href: "/import", label: "Importér" },
   { href: "/indstillinger", label: "Indstillinger" },
 ];
