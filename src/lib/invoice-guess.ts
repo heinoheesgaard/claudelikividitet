@@ -1,6 +1,6 @@
 import "server-only";
 import { extractText } from "unpdf";
-import { createWorker, type Worker as TesseractWorker } from "tesseract.js";
+import type { Worker as TesseractWorker } from "tesseract.js";
 
 // A classic Danish invoice's totals section reads, in this order:
 //   Beløb ekskl. moms (subtotal)  ->  Moms 25% (VAT, almost always a flat
@@ -90,15 +90,19 @@ function findLabeledAmounts(text: string, labels: string[]): AmountMatch[] {
 
     // Only check right around this specific label — a table header row can
     // legitimately list "Moms" and "MomsBeløb" as *other* columns next to
-    // "Total beløb", and that shouldn't disqualify the total column. Also
-    // catches English "excluding tax" / "ex. tax" subtotal lines.
+    // "Total beløb", and that shouldn't disqualify the total column.
+    // "(inkl. moms)" / "incl. VAT" next to the label is actually a good
+    // sign — it confirms this total already includes VAT — so only a
+    // pre-VAT qualifier ("ekskl. moms", "excluding tax", bare "moms" with
+    // no "inkl"/"incl" nearby) should disqualify a match.
     const localStart = Math.max(0, labelMatch.index - 10);
     const localEnd = labelMatch.index + labelMatch[0].length + 15;
     const localContext = line.slice(localStart, localEnd).toLowerCase();
-    if (
-      localContext.includes("moms") ||
-      /eks(kl)?\.?\s*moms|excl(uding)?\.?\s*(vat|tax)|ex\.?\s*tax|before\s*tax/.test(localContext)
-    ) {
+    const mentionsMoms = localContext.includes("moms") || /\bvat\b/.test(localContext);
+    const confirmsInclVat = /\bink(l)?\.?\s*(moms|vat)|\binc(l)?\.?\s*(moms|vat)/.test(localContext);
+    const isPreVat =
+      /eks(kl)?\.?\s*moms|excl(uding)?\.?\s*(vat|tax)|ex\.?\s*tax|before\s*tax/.test(localContext);
+    if (isPreVat || (mentionsMoms && !confirmsInclVat)) {
       continue;
     }
 
@@ -208,12 +212,16 @@ function buildGuessFromText(text: string): GuessedDetails {
 
 // Reused across calls (and across warm serverless invocations) so we only
 // pay Tesseract's startup + language-download cost once per instance,
-// instead of once per receipt photo.
+// instead of once per receipt photo. Loaded dynamically so a bundling or
+// startup failure in this optional dependency can never break PDF-only
+// guessing, which doesn't need it at all.
 let ocrWorkerPromise: Promise<TesseractWorker> | null = null;
 
 function getOcrWorker(): Promise<TesseractWorker> {
   if (!ocrWorkerPromise) {
-    ocrWorkerPromise = createWorker("dan+eng");
+    ocrWorkerPromise = import("tesseract.js").then(({ createWorker }) =>
+      createWorker("dan+eng"),
+    );
   }
   return ocrWorkerPromise;
 }

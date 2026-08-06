@@ -18,54 +18,62 @@ export async function POST(request: NextRequest) {
   const startedAt = Date.now();
   let processed = 0;
   let updated = 0;
-  let nextCursor: string | null = null;
   let sawFullPage = false;
 
-  while (Date.now() - startedAt < TIME_BUDGET_MS) {
-    const candidates = await prisma.bilag.findMany({
-      where: { status: "MANGLER_BELOEB" },
-      orderBy: { id: "asc" },
-      take: PAGE_SIZE,
-      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-      include: {
-        attachments: { select: { filename: true, contentType: true, data: true } },
-      },
-    });
+  try {
+    while (Date.now() - startedAt < TIME_BUDGET_MS) {
+      const candidates = await prisma.bilag.findMany({
+        where: { status: "MANGLER_BELOEB" },
+        orderBy: { id: "asc" },
+        take: PAGE_SIZE,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+        include: {
+          attachments: { select: { filename: true, contentType: true, data: true } },
+        },
+      });
 
-    if (candidates.length === 0) {
-      sawFullPage = false;
-      break;
-    }
-
-    for (const bilag of candidates) {
-      const attachments = bilag.attachments.map((a) => ({
-        filename: a.filename,
-        contentType: a.contentType,
-        data: new Uint8Array(a.data) as Uint8Array<ArrayBuffer>,
-      }));
-      const { guessedAmount, guessedCurrency, guessedVendor, guessedInvoiceDate } =
-        await guessInvoiceDetails(attachments);
-      processed += 1;
-      if (guessedAmount !== null || guessedVendor !== null || guessedInvoiceDate !== null) {
-        await prisma.bilag.update({
-          where: { id: bilag.id },
-          data: { guessedAmount, guessedCurrency, guessedVendor, guessedInvoiceDate },
-        });
-        updated += 1;
+      if (candidates.length === 0) {
+        sawFullPage = false;
+        break;
       }
+
+      for (const bilag of candidates) {
+        const attachments = bilag.attachments.map((a) => ({
+          filename: a.filename,
+          contentType: a.contentType,
+          data: new Uint8Array(a.data) as Uint8Array<ArrayBuffer>,
+        }));
+        const { guessedAmount, guessedCurrency, guessedVendor, guessedInvoiceDate } =
+          await guessInvoiceDetails(attachments);
+        processed += 1;
+        if (guessedAmount !== null || guessedVendor !== null || guessedInvoiceDate !== null) {
+          await prisma.bilag.update({
+            where: { id: bilag.id },
+            data: { guessedAmount, guessedCurrency, guessedVendor, guessedInvoiceDate },
+          });
+          updated += 1;
+        }
+      }
+
+      cursor = candidates[candidates.length - 1].id;
+      sawFullPage = candidates.length === PAGE_SIZE;
+      if (!sawFullPage || Date.now() - startedAt >= TIME_BUDGET_MS) break;
     }
 
-    cursor = candidates[candidates.length - 1].id;
-    sawFullPage = candidates.length === PAGE_SIZE;
-    if (!sawFullPage || Date.now() - startedAt >= TIME_BUDGET_MS) break;
+    const nextCursor = sawFullPage ? (cursor ?? null) : null;
+
+    return NextResponse.json({
+      ok: true,
+      processed,
+      updated,
+      nextCursor,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("guess-backfill failed", error);
+    return NextResponse.json(
+      { ok: false, error: message, processed, updated },
+      { status: 500 },
+    );
   }
-
-  nextCursor = sawFullPage ? (cursor ?? null) : null;
-
-  return NextResponse.json({
-    ok: true,
-    processed,
-    updated,
-    nextCursor,
-  });
 }
