@@ -49,6 +49,7 @@ export async function GET(request: NextRequest) {
 
   const days = Number(request.nextUrl.searchParams.get("days") ?? "3") || 3;
   const pageToken = request.nextUrl.searchParams.get("pageToken") ?? undefined;
+  const limit = Math.min(Number(request.nextUrl.searchParams.get("limit") ?? "50") || 50, 100);
 
   try {
     const gmail = getGmailClient();
@@ -56,7 +57,7 @@ export async function GET(request: NextRequest) {
     const listRes = await gmail.users.messages.list({
       userId: "me",
       q: `to:${recipient} newer_than:${days}d`,
-      maxResults: 100,
+      maxResults: limit,
       pageToken,
     });
 
