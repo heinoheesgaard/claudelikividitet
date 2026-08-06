@@ -14,16 +14,20 @@ const STOPWORDS = new Set([
   "notanr",
   "til",
   "fra",
-  "mob.pay",
+  "mob",
+  "pay",
   "mobpay",
   "aps",
-  "a/s",
+  "com",
 ]);
 
 function significantWords(text: string): string[] {
+  // Punctuation (including "." in domains like "gs-supply.dk") is treated as
+  // a word break, so "supply" alone can still match a candidate whose text
+  // only says "GS Supply" without the ".dk" suffix.
   return text
     .toLowerCase()
-    .replace(/[^a-zæøå0-9.\s]/g, " ")
+    .replace(/[^a-zæøå0-9\s]/g, " ")
     .split(/\s+/)
     .filter((w) => w.length >= 3 && !/^\d+$/.test(w) && !STOPWORDS.has(w));
 }
@@ -82,11 +86,16 @@ export async function POST(request: NextRequest) {
           .toLowerCase();
         const score = words.filter((w) => haystack.includes(w)).length + dateBonus;
         if (score === 0) return null;
-        return { bilag: c, score, daysSincePurchase };
+        return { bilag: c, score, daysSincePurchase, hasAttachment: c.attachments.length > 0 };
       })
       .filter((x): x is NonNullable<typeof x> => x !== null)
-      .sort((a, b) => b.score - a.score || a.daysSincePurchase - b.daysSincePurchase)
-      .slice(0, 3);
+      .sort(
+        (a, b) =>
+          b.score - a.score ||
+          Number(b.hasAttachment) - Number(a.hasAttachment) ||
+          a.daysSincePurchase - b.daysSincePurchase,
+      )
+      .slice(0, 1);
 
     return {
       bilagNumber: row.bilagNumber,

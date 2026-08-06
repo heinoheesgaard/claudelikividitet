@@ -141,15 +141,7 @@ export default function BilagAfstemningPage() {
 
   const notFound = results?.filter((r) => r.matches.length === 0) ?? [];
   const found = results?.filter((r) => r.matches.length > 0) ?? [];
-  // Prefer the best-scored match that actually has a file attached — a
-  // higher-ranked match with no attachment is useless to download.
-  const bestMatchBilagIds = [
-    ...new Set(
-      found
-        .map((r) => r.matches.find((m) => m.attachments.length > 0)?.bilagId)
-        .filter((id): id is string => id !== undefined),
-    ),
-  ];
+  const bestMatchBilagIds = [...new Set(found.map((r) => r.matches[0].bilagId))];
 
   return (
     <div className="flex flex-col gap-8">
@@ -243,34 +235,32 @@ export default function BilagAfstemningPage() {
                   <p className="text-slate-900 font-medium mt-1">
                     {r.text} — {formatDKK(r.amount)}
                   </p>
-                  <ul className="mt-2 flex flex-col gap-1">
-                    {r.matches.map((m) => (
-                      <li key={m.bilagId} className="text-sm text-slate-600">
-                        Muligt match: <span className="font-medium">{m.subject}</span> fra{" "}
-                        {m.senderEmail}
-                        {m.guessedInvoiceDate
-                          ? ` (faktura ${formatDate(m.guessedInvoiceDate)}, modtaget ${formatDate(m.receivedAt)})`
-                          : ` (modtaget ${formatDate(m.receivedAt)})`}
-                        {m.attachments.length > 0 ? (
-                          <span className="ml-2 inline-flex flex-wrap gap-2">
-                            {m.attachments.map((a) => (
-                              <a
-                                key={a.id}
-                                href={`/api/bilag/attachments/${a.id}`}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="text-blue-600 hover:underline"
-                              >
-                                📎 {a.filename}
-                              </a>
-                            ))}
-                          </span>
-                        ) : (
-                          <span className="ml-2 text-amber-700">(ingen vedhæftet fil)</span>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
+                  {r.matches[0] && (
+                    <div className="mt-2 text-sm text-slate-600">
+                      <span className="font-medium">{r.matches[0].subject}</span> fra{" "}
+                      {r.matches[0].senderEmail}
+                      {r.matches[0].guessedInvoiceDate
+                        ? ` (faktura ${formatDate(r.matches[0].guessedInvoiceDate)}, modtaget ${formatDate(r.matches[0].receivedAt)})`
+                        : ` (modtaget ${formatDate(r.matches[0].receivedAt)})`}
+                      {r.matches[0].attachments.length > 0 ? (
+                        <span className="ml-2 inline-flex flex-wrap gap-2">
+                          {r.matches[0].attachments.map((a) => (
+                            <a
+                              key={a.id}
+                              href={`/api/bilag/attachments/${a.id}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-blue-600 hover:underline"
+                            >
+                              📎 {a.filename}
+                            </a>
+                          ))}
+                        </span>
+                      ) : (
+                        <span className="ml-2 text-amber-700">(ingen vedhæftet fil)</span>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
