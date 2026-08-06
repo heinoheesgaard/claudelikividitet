@@ -61,6 +61,7 @@ export async function POST(request: NextRequest) {
       receivedAt: true,
       guessedInvoiceDate: true,
       guessedAmount: true,
+      guessedCurrency: true,
       status: true,
       attachments: { select: { id: true, filename: true } },
     },
@@ -86,8 +87,14 @@ export async function POST(request: NextRequest) {
         // The amount is the strongest signal of all — two independent records
         // (bank statement vs. invoice PDF) agreeing on the exact same amount is
         // rarely a coincidence, even when the vendor text doesn't overlap at all.
+        // Only trust it when the guessed amount is in DKK — the bank statement
+        // amount always is, so a EUR/USD invoice total isn't comparable without
+        // a currency conversion we don't do.
+        const isComparableCurrency = c.guessedCurrency === null || c.guessedCurrency === "DKK";
         const amountDiff =
-          c.guessedAmount !== null ? Math.abs(c.guessedAmount - Math.abs(row.amount)) : null;
+          c.guessedAmount !== null && isComparableCurrency
+            ? Math.abs(c.guessedAmount - Math.abs(row.amount))
+            : null;
         const amountBonus = amountDiff === null ? 0 : amountDiff <= 1 ? 20 : amountDiff <= 5 ? 8 : 0;
 
         const haystack = `${c.subject} ${c.senderEmail} ${c.snippet ?? ""} ${c.attachmentNames}`
@@ -117,6 +124,7 @@ export async function POST(request: NextRequest) {
         receivedAt: s.bilag.receivedAt,
         guessedInvoiceDate: s.bilag.guessedInvoiceDate,
         guessedAmount: s.bilag.guessedAmount,
+        guessedCurrency: s.bilag.guessedCurrency,
         status: s.bilag.status,
         score: s.score,
         attachments: s.bilag.attachments,

@@ -246,7 +246,11 @@ function BilagRow({
     }
   }, [bilag.attachmentNames]);
 
-  const [amount, setAmount] = useState(bilag.guessedAmount ? String(bilag.guessedAmount) : "");
+  const guessedAmountIsDKK =
+    bilag.guessedCurrency === null || bilag.guessedCurrency === "DKK";
+  const [amount, setAmount] = useState(
+    bilag.guessedAmount && guessedAmountIsDKK ? String(bilag.guessedAmount) : "",
+  );
   const [type, setType] = useState<"EXPENSE" | "INCOME">("EXPENSE");
   const [categoryId, setCategoryId] = useState("");
   const [businessAreaId, setBusinessAreaId] = useState("");
@@ -373,6 +377,12 @@ function BilagRow({
               }`}
               placeholder="0,00"
             />
+            {!guessedAmountIsDKK && bilag.guessedAmount != null && (
+              <span className="text-amber-700">
+                Fandt {bilag.guessedAmount} {bilag.guessedCurrency} — ikke DKK, indtast selv
+                DKK-beløbet
+              </span>
+            )}
           </label>
           <label className="flex flex-col gap-1 text-xs">
             <span className="text-slate-500">Kategori</span>

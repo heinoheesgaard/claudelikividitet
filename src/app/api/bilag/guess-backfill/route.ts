@@ -27,13 +27,12 @@ export async function POST(request: NextRequest) {
       contentType: a.contentType,
       data: new Uint8Array(a.data) as Uint8Array<ArrayBuffer>,
     }));
-    const { guessedAmount, guessedVendor, guessedInvoiceDate } = await guessInvoiceDetails(
-      attachments,
-    );
+    const { guessedAmount, guessedCurrency, guessedVendor, guessedInvoiceDate } =
+      await guessInvoiceDetails(attachments);
     if (guessedAmount !== null || guessedVendor !== null || guessedInvoiceDate !== null) {
       await prisma.bilag.update({
         where: { id: bilag.id },
-        data: { guessedAmount, guessedVendor, guessedInvoiceDate },
+        data: { guessedAmount, guessedCurrency, guessedVendor, guessedInvoiceDate },
       });
       updated += 1;
     }

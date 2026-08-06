@@ -6,6 +6,9 @@ import { extractText } from "unpdf";
 //   25% rate in Denmark)  ->  I alt / Total / At betale (grand total incl.
 //   VAT — this is the only figure that will ever show up on a bank
 //   statement, so it's the only one worth guessing).
+// Foreign invoices (e.g. SaaS subscriptions billed in EUR/USD) use their own
+// wording — "Amount due", "Total" — which is why both Danish and English
+// labels are included here.
 // Strongest-first: labels that specifically mean "this is the final,
 // payable amount" beat generic ones like bare "total", which also shows up
 // in "Total moms" or "Subtotal" headings.
@@ -25,28 +28,50 @@ const STRONG_LABELS = [
   "total",
 ];
 const WEAK_LABELS = ["beløb", "sum"];
-const AMOUNT_ANY_RE = /(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2})\s*(?:kr\.?|dkk)/gi;
 const DATE_RE = /\b(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})\b/g;
 
-function parseDanishAmount(raw: string): number {
-  return Number(raw.replace(/\./g, "").replace(",", "."));
+// Matches a money amount in either Danish (1.234,56) or international
+// (1,234.56 / 22.50) notation, with group 2 flagging a trailing "%" so
+// callers can exclude VAT rates written the same way ("25,00 %").
+const LINE_AMOUNT_RE = /(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})(\s*%)?/g;
+
+function parseAmount(raw: string): number {
+  // Whichever separator appears last is the decimal point; the other kind
+  // (if any) is a thousands separator to strip. Handles "1.234,56" (Danish),
+  // "1,234.56" (international) and plain "22.50" / "22,50" alike.
+  const lastComma = raw.lastIndexOf(",");
+  const lastDot = raw.lastIndexOf(".");
+  if (lastComma > lastDot) {
+    return Number(raw.replace(/\./g, "").replace(",", "."));
+  }
+  return Number(raw.replace(/,/g, ""));
 }
 
-// Matches a money amount, but reports (via group 2) whether it's actually a
-// percentage ("25,00 %") so callers can exclude VAT rates.
-const LINE_AMOUNT_RE = /(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2})(\s*%)?/g;
+function detectCurrency(context: string): string | null {
+  const lower = context.toLowerCase();
+  if (lower.includes("€") || /\beur\b/.test(lower)) return "EUR";
+  if (lower.includes("$") || /\busd\b/.test(lower)) return "USD";
+  if (lower.includes("£") || /\bgbp\b/.test(lower)) return "GBP";
+  if (lower.includes("kr") || /\bdkk\b/.test(lower)) return "DKK";
+  return null;
+}
 
-function extractLineAmounts(line: string): number[] {
-  const amounts: number[] = [];
+type AmountMatch = { amount: number; currency: string | null };
+
+function extractLineAmounts(line: string): AmountMatch[] {
+  const results: AmountMatch[] = [];
   for (const m of line.matchAll(LINE_AMOUNT_RE)) {
     if (m[2]) continue; // a percentage, e.g. a VAT rate — not a money amount
-    const amount = parseDanishAmount(m[1]);
-    if (Number.isFinite(amount) && amount > 0) amounts.push(amount);
+    const amount = parseAmount(m[1]);
+    if (!Number.isFinite(amount) || amount <= 0) continue;
+    const idx = m.index ?? 0;
+    const context = line.slice(Math.max(0, idx - 6), idx + m[0].length + 6);
+    results.push({ amount, currency: detectCurrency(context) });
   }
-  return amounts;
+  return results;
 }
 
-function findLabeledAmounts(text: string, labels: string[]): number[] {
+function findLabeledAmounts(text: string, labels: string[]): AmountMatch[] {
   // \b boundaries stop "total" from matching inside "subtotal", or "beløb"
   // inside "nettobeløb".
   const labelPattern = new RegExp(
@@ -55,7 +80,7 @@ function findLabeledAmounts(text: string, labels: string[]): number[] {
   );
 
   const lines = text.split("\n");
-  const amounts: number[] = [];
+  const matches: AmountMatch[] = [];
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -64,19 +89,23 @@ function findLabeledAmounts(text: string, labels: string[]): number[] {
 
     // Only check right around this specific label — a table header row can
     // legitimately list "Moms" and "MomsBeløb" as *other* columns next to
-    // "Total beløb", and that shouldn't disqualify the total column.
+    // "Total beløb", and that shouldn't disqualify the total column. Also
+    // catches English "excluding tax" / "ex. tax" subtotal lines.
     const localStart = Math.max(0, labelMatch.index - 10);
-    const localEnd = labelMatch.index + labelMatch[0].length + 10;
+    const localEnd = labelMatch.index + labelMatch[0].length + 15;
     const localContext = line.slice(localStart, localEnd).toLowerCase();
-    // Skip VAT lines ("moms", "heraf moms") and subtotals ("ekskl. moms",
-    // "excl. vat") — only the VAT-inclusive grand total should count.
-    if (localContext.includes("moms") || /eks(kl)?\.?\s*moms|excl/.test(localContext)) continue;
+    if (
+      localContext.includes("moms") ||
+      /eks(kl)?\.?\s*moms|excl(uding)?\.?\s*(vat|tax)|ex\.?\s*tax|before\s*tax/.test(localContext)
+    ) {
+      continue;
+    }
 
-    // Same-line form: "I alt   1.250,00" or "I alt: 1.250,00 kr".
+    // Same-line form: "I alt   1.250,00" or "Amount due   €22.50".
     const afterLabel = line.slice(labelMatch.index + labelMatch[0].length);
     const sameLineAmounts = extractLineAmounts(afterLabel);
     if (sameLineAmounts.length > 0) {
-      amounts.push(sameLineAmounts[sameLineAmounts.length - 1]);
+      matches.push(sameLineAmounts[sameLineAmounts.length - 1]);
       continue;
     }
 
@@ -87,16 +116,16 @@ function findLabeledAmounts(text: string, labels: string[]): number[] {
     for (let j = i + 1; j <= Math.min(i + 2, lines.length - 1); j++) {
       const rowAmounts = extractLineAmounts(lines[j]);
       if (rowAmounts.length > 0) {
-        amounts.push(rowAmounts[rowAmounts.length - 1]);
+        matches.push(rowAmounts[rowAmounts.length - 1]);
         break;
       }
     }
   }
 
-  return amounts;
+  return matches;
 }
 
-function guessAmountFromText(text: string): number | null {
+function guessAmountFromText(text: string): AmountMatch | null {
   // The final total is usually the last "strong" label mentioned in reading
   // order (it comes after any subtotal/VAT lines), not necessarily the
   // largest number on the page.
@@ -107,14 +136,12 @@ function guessAmountFromText(text: string): number | null {
 
   const weak = findLabeledAmounts(text, WEAK_LABELS);
   if (weak.length > 0) {
-    return Math.max(...weak);
+    return weak.reduce((max, m) => (m.amount > max.amount ? m : max));
   }
 
-  const anyMatches = [...text.matchAll(AMOUNT_ANY_RE)]
-    .map((m) => parseDanishAmount(m[1]))
-    .filter((n) => Number.isFinite(n) && n > 0);
-  if (anyMatches.length > 0) {
-    return Math.max(...anyMatches);
+  const any = extractLineAmounts(text).filter((m) => m.currency !== null);
+  if (any.length > 0) {
+    return any.reduce((max, m) => (m.amount > max.amount ? m : max));
   }
 
   return null;
@@ -155,10 +182,16 @@ export async function guessInvoiceDetails(
   attachments: { filename: string; contentType: string; data: Uint8Array<ArrayBuffer> }[],
 ): Promise<{
   guessedAmount: number | null;
+  guessedCurrency: string | null;
   guessedVendor: string | null;
   guessedInvoiceDate: Date | null;
 }> {
-  const empty = { guessedAmount: null, guessedVendor: null, guessedInvoiceDate: null };
+  const empty = {
+    guessedAmount: null,
+    guessedCurrency: null,
+    guessedVendor: null,
+    guessedInvoiceDate: null,
+  };
   const pdf = attachments.find(
     (a) => a.contentType === "application/pdf" || a.filename.toLowerCase().endsWith(".pdf"),
   );
@@ -169,8 +202,13 @@ export async function guessInvoiceDetails(
     // it an independent copy — the original bytes still need to be written to
     // the database unmodified after this runs.
     const { text } = await extractText(pdf.data.slice(), { mergePages: true });
+    const amountMatch = guessAmountFromText(text);
     return {
-      guessedAmount: guessAmountFromText(text),
+      // No currency symbol found near the number almost always means it's a
+      // plain Danish invoice (kr is often implied, not spelled out in every
+      // table cell) — default to DKK rather than leaving it unknown.
+      guessedAmount: amountMatch?.amount ?? null,
+      guessedCurrency: amountMatch ? amountMatch.currency ?? "DKK" : null,
       guessedVendor: guessVendorFromText(text),
       guessedInvoiceDate: guessDateFromText(text),
     };
