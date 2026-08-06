@@ -244,7 +244,15 @@ function BilagRow({
             {bilag.guessedVendor ?? bilag.subject}
           </p>
           <p className="text-xs text-slate-500 mt-0.5">
-            {formatDate(bilag.receivedAt)} · fra {bilag.senderEmail}
+            {bilag.guessedInvoiceDate ? (
+              <>
+                Faktura: {formatDate(bilag.guessedInvoiceDate)} · modtaget{" "}
+                {formatDate(bilag.receivedAt)}
+              </>
+            ) : (
+              <>Modtaget {formatDate(bilag.receivedAt)}</>
+            )}{" "}
+            · fra {bilag.senderEmail}
             {bilag.guessedVendor && ` · "${bilag.subject}"`}
           </p>
           {bilag.attachments.length > 0 ? (

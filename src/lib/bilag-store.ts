@@ -25,7 +25,9 @@ export async function storeBilag(input: NormalizedBilag) {
     return { bilagId: existing.id, skipped: true, attachments: 0 };
   }
 
-  const { guessedAmount, guessedVendor } = await guessInvoiceDetails(input.attachments);
+  const { guessedAmount, guessedVendor, guessedInvoiceDate } = await guessInvoiceDetails(
+    input.attachments,
+  );
 
   const bilag = await prisma.bilag.create({
     data: {
@@ -38,6 +40,7 @@ export async function storeBilag(input: NormalizedBilag) {
       snippet: input.snippet,
       guessedAmount,
       guessedVendor,
+      guessedInvoiceDate,
       attachments: {
         create: input.attachments,
       },

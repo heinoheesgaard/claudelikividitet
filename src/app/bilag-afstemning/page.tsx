@@ -8,6 +8,7 @@ type MatchCandidate = {
   subject: string;
   senderEmail: string;
   receivedAt: string;
+  guessedInvoiceDate: string | null;
   status: string;
   score: number;
 };
@@ -186,7 +187,10 @@ export default function BilagAfstemningPage() {
                     {r.matches.map((m) => (
                       <li key={m.bilagId} className="text-sm text-slate-600">
                         Muligt match: <span className="font-medium">{m.subject}</span> fra{" "}
-                        {m.senderEmail} ({formatDate(m.receivedAt)})
+                        {m.senderEmail}
+                        {m.guessedInvoiceDate
+                          ? ` (faktura ${formatDate(m.guessedInvoiceDate)}, modtaget ${formatDate(m.receivedAt)})`
+                          : ` (modtaget ${formatDate(m.receivedAt)})`}
                       </li>
                     ))}
                   </ul>

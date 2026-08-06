@@ -55,6 +55,7 @@ export async function POST(request: NextRequest) {
       snippet: true,
       attachmentNames: true,
       receivedAt: true,
+      guessedInvoiceDate: true,
       status: true,
     },
   });
@@ -67,9 +68,18 @@ export async function POST(request: NextRequest) {
       .map((c) => {
         const daysSincePurchase = (c.receivedAt.getTime() - rowDate.getTime()) / (1000 * 60 * 60 * 24);
         if (daysSincePurchase < -5) return null;
+
+        // A close match on the invoice's own date (read from the PDF) is a much
+        // stronger signal than text overlap, since the bank statement date and
+        // the invoice date should be the same purchase.
+        const invoiceDateDiff = c.guessedInvoiceDate
+          ? Math.abs((c.guessedInvoiceDate.getTime() - rowDate.getTime()) / (1000 * 60 * 60 * 24))
+          : null;
+        const dateBonus = invoiceDateDiff !== null && invoiceDateDiff <= 2 ? 5 : 0;
+
         const haystack = `${c.subject} ${c.senderEmail} ${c.snippet ?? ""} ${c.attachmentNames}`
           .toLowerCase();
-        const score = words.filter((w) => haystack.includes(w)).length;
+        const score = words.filter((w) => haystack.includes(w)).length + dateBonus;
         if (score === 0) return null;
         return { bilag: c, score, daysSincePurchase };
       })
@@ -87,6 +97,7 @@ export async function POST(request: NextRequest) {
         subject: s.bilag.subject,
         senderEmail: s.bilag.senderEmail,
         receivedAt: s.bilag.receivedAt,
+        guessedInvoiceDate: s.bilag.guessedInvoiceDate,
         status: s.bilag.status,
         score: s.score,
       })),
