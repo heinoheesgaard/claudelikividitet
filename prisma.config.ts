@@ -10,6 +10,10 @@ export default defineConfig({
     seed: "tsx prisma/seed.ts",
   },
   datasource: {
-    url: process.env["DATABASE_URL"],
+    // The pooled DATABASE_URL (PgBouncer) doesn't hold the session-scoped
+    // advisory lock `prisma migrate deploy` needs, causing build-time P1002
+    // timeouts. The direct/unpooled URL avoids that; fine for this app's
+    // low, single-team traffic.
+    url: process.env["DATABASE_URL_UNPOOLED"] ?? process.env["DATABASE_URL"],
   },
 });
