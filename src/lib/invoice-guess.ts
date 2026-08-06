@@ -1,17 +1,24 @@
 import "server-only";
 import { extractText } from "unpdf";
 
-// Ordered strongest-first: a document can mention several "total-ish" labels
-// (subtotal, VAT total, grand total) — the strong tier is only for labels
-// that specifically mean "this is the final amount", so we don't need to
-// pick a number out of several equally-weighted candidates.
+// A classic Danish invoice's totals section reads, in this order:
+//   Beløb ekskl. moms (subtotal)  ->  Moms 25% (VAT, almost always a flat
+//   25% rate in Denmark)  ->  I alt / Total / At betale (grand total incl.
+//   VAT — this is the only figure that will ever show up on a bank
+//   statement, so it's the only one worth guessing).
+// Strongest-first: labels that specifically mean "this is the final,
+// payable amount" beat generic ones like bare "total", which also shows up
+// in "Total moms" or "Subtotal" headings.
 const STRONG_LABELS = [
+  "i alt at betale",
+  "beløb at betale",
+  "at betale",
+  "betalingsbeløb",
+  "til betaling",
   "i alt",
   "totalbeløb",
   "total beløb",
   "samlet beløb",
-  "beløb at betale",
-  "at betale",
   "grand total",
   "amount due",
   "total amount",
@@ -28,16 +35,29 @@ function parseDanishAmount(raw: string): number {
 function findLabeledAmounts(text: string, labels: string[]): number[] {
   // The gap between label and number is allowed to cross line breaks, since
   // PDF table layouts often put the label and its value on separate lines.
+  // \b boundaries stop "total" from matching inside "subtotal", or "beløb"
+  // inside "nettobeløb".
   const pattern = new RegExp(
-    `(${labels.map((l) => l.replace(/\s+/g, "\\s+")).join("|")})[^\\d]{0,40}(\\d{1,3}(?:\\.\\d{3})*,\\d{2}|\\d+,\\d{2})`,
+    `\\b(${labels.map((l) => l.replace(/\s+/g, "\\s+")).join("|")})\\b([^\\d]{0,40})(\\d{1,3}(?:\\.\\d{3})*,\\d{2}|\\d+,\\d{2})(\\s*%)?`,
     "gi",
   );
   const amounts: number[] = [];
   for (const m of text.matchAll(pattern)) {
+    if (m[4]) continue; // "moms 25,00 %" is a VAT rate, not a money amount
+
     const start = m.index ?? 0;
-    const precedingContext = text.slice(Math.max(0, start - 15), start).toLowerCase();
-    if (precedingContext.includes("moms")) continue; // skip VAT-only subtotals
-    const amount = parseDanishAmount(m[2]);
+    const gapText = m[2].toLowerCase();
+    // Only look back as far as the start of the current line — a "Moms 25%"
+    // line almost always sits directly above the real "I alt" total, so
+    // scanning across the line break would wrongly disqualify it every time.
+    const lineStart = text.lastIndexOf("\n", start - 1) + 1;
+    const precedingContext = text.slice(lineStart, start).toLowerCase();
+    // Skip VAT lines ("moms", "heraf moms") and subtotals ("ekskl. moms",
+    // "excl. vat") — only the VAT-inclusive grand total should count.
+    if (precedingContext.includes("moms") || gapText.includes("moms")) continue;
+    if (/eks(kl)?\.?\s*moms|excl/.test(precedingContext)) continue;
+
+    const amount = parseDanishAmount(m[3]);
     if (Number.isFinite(amount) && amount > 0) amounts.push(amount);
   }
   return amounts;
