@@ -3,6 +3,11 @@
 import { useState } from "react";
 import { formatDKK, formatDate } from "@/lib/format";
 
+type MatchAttachment = {
+  id: string;
+  filename: string;
+};
+
 type MatchCandidate = {
   bilagId: string;
   subject: string;
@@ -11,6 +16,7 @@ type MatchCandidate = {
   guessedInvoiceDate: string | null;
   status: string;
   score: number;
+  attachments: MatchAttachment[];
 };
 
 type MatchResult = {
@@ -102,8 +108,40 @@ export default function BilagAfstemningPage() {
     setLoading(false);
   }
 
+  const [zipping, setZipping] = useState(false);
+  const [zipError, setZipError] = useState<string | null>(null);
+
+  async function downloadZip(bilagIds: string[]) {
+    if (bilagIds.length === 0) return;
+    setZipping(true);
+    setZipError(null);
+    try {
+      const res = await fetch("/api/bilag/zip", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bilagIds }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setZipError(body.error ?? "Kunne ikke downloade bilag.");
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "bilag.zip";
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      setZipError("Der skete en fejl under download.");
+    }
+    setZipping(false);
+  }
+
   const notFound = results?.filter((r) => r.matches.length === 0) ?? [];
   const found = results?.filter((r) => r.matches.length > 0) ?? [];
+  const bestMatchBilagIds = [...new Set(found.map((r) => r.matches[0].bilagId))];
 
   return (
     <div className="flex flex-col gap-8">
@@ -170,9 +208,23 @@ export default function BilagAfstemningPage() {
           </section>
 
           <section className="bg-white border border-slate-200 rounded-lg p-6">
-            <h2 className="text-lg font-semibold text-slate-900 mb-4">
-              ✅ Fundet i Bilag-indbakken ({found.length})
-            </h2>
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+              <h2 className="text-lg font-semibold text-slate-900">
+                ✅ Fundet i Bilag-indbakken ({found.length})
+              </h2>
+              <button
+                onClick={() => downloadZip(bestMatchBilagIds)}
+                disabled={zipping || bestMatchBilagIds.length === 0}
+                className="bg-slate-900 text-white rounded-md px-3 py-1.5 text-sm font-medium disabled:opacity-50"
+              >
+                {zipping ? "Pakker…" : `Download alle som ZIP (${bestMatchBilagIds.length})`}
+              </button>
+            </div>
+            {zipError && <p className="text-sm text-red-600 mb-3">{zipError}</p>}
+            <p className="text-xs text-slate-500 mb-4">
+              ZIP'en indeholder de mest sandsynlige match (øverste forslag pr. række) — tjek gerne
+              efter inden du sender videre til revisor.
+            </p>
             <div className="flex flex-col gap-4">
               {found.map((r) => (
                 <div key={r.bilagNumber} className="border border-slate-200 rounded-md p-4">
@@ -191,6 +243,21 @@ export default function BilagAfstemningPage() {
                         {m.guessedInvoiceDate
                           ? ` (faktura ${formatDate(m.guessedInvoiceDate)}, modtaget ${formatDate(m.receivedAt)})`
                           : ` (modtaget ${formatDate(m.receivedAt)})`}
+                        {m.attachments.length > 0 && (
+                          <span className="ml-2 inline-flex flex-wrap gap-2">
+                            {m.attachments.map((a) => (
+                              <a
+                                key={a.id}
+                                href={`/api/bilag/attachments/${a.id}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-blue-600 hover:underline"
+                              >
+                                📎 {a.filename}
+                              </a>
+                            ))}
+                          </span>
+                        )}
                       </li>
                     ))}
                   </ul>

@@ -57,6 +57,7 @@ export async function POST(request: NextRequest) {
       receivedAt: true,
       guessedInvoiceDate: true,
       status: true,
+      attachments: { select: { id: true, filename: true } },
     },
   });
 
@@ -100,6 +101,7 @@ export async function POST(request: NextRequest) {
         guessedInvoiceDate: s.bilag.guessedInvoiceDate,
         status: s.bilag.status,
         score: s.score,
+        attachments: s.bilag.attachments,
       })),
     };
   });
