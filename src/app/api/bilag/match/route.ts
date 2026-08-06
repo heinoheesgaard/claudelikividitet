@@ -39,10 +39,12 @@ export async function POST(request: NextRequest) {
   if (dates.length === 0) {
     return NextResponse.json({ error: "Ingen gyldige datoer i filen." }, { status: 400 });
   }
+  // A bilag can be submitted to revisorkurt long after the purchase date (late
+  // submission), but never before it — so the search window only needs a small
+  // buffer before the earliest purchase date, and can run all the way to today.
   const minDate = new Date(Math.min(...dates.map((d) => d.getTime())));
   minDate.setDate(minDate.getDate() - 5);
-  const maxDate = new Date(Math.max(...dates.map((d) => d.getTime())));
-  maxDate.setDate(maxDate.getDate() + 30);
+  const maxDate = new Date();
 
   const candidates = await prisma.bilag.findMany({
     where: { receivedAt: { gte: minDate, lte: maxDate } },
@@ -63,18 +65,16 @@ export async function POST(request: NextRequest) {
 
     const scored = candidates
       .map((c) => {
-        const dayDiff = Math.abs(
-          (c.receivedAt.getTime() - rowDate.getTime()) / (1000 * 60 * 60 * 24),
-        );
-        if (dayDiff < -5 || dayDiff > 30) return null;
+        const daysSincePurchase = (c.receivedAt.getTime() - rowDate.getTime()) / (1000 * 60 * 60 * 24);
+        if (daysSincePurchase < -5) return null;
         const haystack = `${c.subject} ${c.senderEmail} ${c.snippet ?? ""} ${c.attachmentNames}`
           .toLowerCase();
         const score = words.filter((w) => haystack.includes(w)).length;
         if (score === 0) return null;
-        return { bilag: c, score, dayDiff };
+        return { bilag: c, score, daysSincePurchase };
       })
       .filter((x): x is NonNullable<typeof x> => x !== null)
-      .sort((a, b) => b.score - a.score || a.dayDiff - b.dayDiff)
+      .sort((a, b) => b.score - a.score || a.daysSincePurchase - b.daysSincePurchase)
       .slice(0, 3);
 
     return {
