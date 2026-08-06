@@ -135,7 +135,7 @@ export default function BilagAfstemningPage() {
         <>
           <section className="bg-red-50 border border-red-200 rounded-lg p-6">
             <h2 className="text-lg font-semibold text-red-900 mb-1">
-              Ikke fundet i Bilag-indbakken ({notFound.length})
+              ❌ Ikke fundet i Bilag-indbakken ({notFound.length})
             </h2>
             <p className="text-sm text-red-700 mb-4">
               Disse mangler sandsynligvis stadig — bed om kvittering igen, eller tjek om de er
@@ -171,7 +171,7 @@ export default function BilagAfstemningPage() {
 
           <section className="bg-white border border-slate-200 rounded-lg p-6">
             <h2 className="text-lg font-semibold text-slate-900 mb-4">
-              Fundet i Bilag-indbakken ({found.length})
+              ✅ Fundet i Bilag-indbakken ({found.length})
             </h2>
             <div className="flex flex-col gap-4">
               {found.map((r) => (

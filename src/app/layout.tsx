@@ -1,10 +1,17 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import Nav from "@/components/nav";
 
 export const metadata: Metadata = {
   title: "Thypisk Julia",
   description: "Overblik over udgifter, indtjening, forretningsområder og bilag",
+};
+
+// Julia's UI only styles a light theme. Without this, browsers/extensions
+// that auto-invert colors for dark mode break contrast on colored panels
+// (e.g. the red "not found" box in bilag reconciliation).
+export const viewport: Viewport = {
+  colorScheme: "light",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
