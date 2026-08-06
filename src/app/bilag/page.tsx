@@ -32,7 +32,10 @@ export default function BilagPage() {
             sikkerhedsnet mod bilag der forsvinder, uanset om economic kunne læse dem.
           </p>
         </div>
-        <FetchBilagButton onDone={() => mutate()} />
+        <div className="flex flex-col gap-3">
+          <FetchBilagButton onDone={() => mutate()} />
+          <GuessBackfillButton onDone={() => mutate()} />
+        </div>
       </div>
 
       <div className="flex gap-2 border-b border-slate-200">
@@ -140,6 +143,68 @@ function FetchBilagButton({ onDone }: { onDone: () => void }) {
           className="bg-slate-900 text-white rounded-md px-3 py-1.5 text-sm font-medium disabled:opacity-50"
         >
           {running ? "Henter…" : "Hent bilag nu"}
+        </button>
+      </div>
+      {progress && <p className="text-xs text-slate-500">{progress}</p>}
+      {error && <p className="text-xs text-red-600">{error}</p>}
+    </div>
+  );
+}
+
+function GuessBackfillButton({ onDone }: { onDone: () => void }) {
+  const [running, setRunning] = useState(false);
+  const [progress, setProgress] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function run() {
+    setRunning(true);
+    setError(null);
+    setProgress("Gætter…");
+
+    let cursor: string | undefined;
+    let totalUpdated = 0;
+    let totalProcessed = 0;
+
+    try {
+      while (true) {
+        const res = await fetch("/api/bilag/guess-backfill", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ cursor }),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          setError(body.error ?? "Kunne ikke gætte beløb.");
+          break;
+        }
+        const body = await res.json();
+        totalUpdated += body.updated;
+        totalProcessed += body.processed;
+        setProgress(`${totalProcessed} bilag tjekket, ${totalUpdated} gæt tilføjet…`);
+        onDone();
+
+        if (!body.nextCursor) {
+          setProgress(`Færdig — ${totalProcessed} bilag tjekket, ${totalUpdated} gæt tilføjet.`);
+          break;
+        }
+        cursor = body.nextCursor;
+      }
+    } catch {
+      setError("Der skete en fejl under gætning.");
+    }
+    setRunning(false);
+  }
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-lg p-4 flex flex-col gap-2 min-w-[260px]">
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-slate-500">Eksisterende bilag uden beløb/leverandør</span>
+        <button
+          onClick={run}
+          disabled={running}
+          className="bg-slate-900 text-white rounded-md px-3 py-1.5 text-sm font-medium disabled:opacity-50"
+        >
+          {running ? "Gætter…" : "Gæt beløb nu"}
         </button>
       </div>
       {progress && <p className="text-xs text-slate-500">{progress}</p>}
