@@ -60,6 +60,7 @@ export async function POST(request: NextRequest) {
       attachmentNames: true,
       receivedAt: true,
       guessedInvoiceDate: true,
+      guessedAmount: true,
       status: true,
       attachments: { select: { id: true, filename: true } },
     },
@@ -82,9 +83,16 @@ export async function POST(request: NextRequest) {
           : null;
         const dateBonus = invoiceDateDiff !== null && invoiceDateDiff <= 2 ? 5 : 0;
 
+        // The amount is the strongest signal of all — two independent records
+        // (bank statement vs. invoice PDF) agreeing on the exact same amount is
+        // rarely a coincidence, even when the vendor text doesn't overlap at all.
+        const amountDiff =
+          c.guessedAmount !== null ? Math.abs(c.guessedAmount - Math.abs(row.amount)) : null;
+        const amountBonus = amountDiff === null ? 0 : amountDiff <= 1 ? 20 : amountDiff <= 5 ? 8 : 0;
+
         const haystack = `${c.subject} ${c.senderEmail} ${c.snippet ?? ""} ${c.attachmentNames}`
           .toLowerCase();
-        const score = words.filter((w) => haystack.includes(w)).length + dateBonus;
+        const score = words.filter((w) => haystack.includes(w)).length + dateBonus + amountBonus;
         if (score === 0) return null;
         return { bilag: c, score, daysSincePurchase, hasAttachment: c.attachments.length > 0 };
       })
@@ -108,6 +116,7 @@ export async function POST(request: NextRequest) {
         senderEmail: s.bilag.senderEmail,
         receivedAt: s.bilag.receivedAt,
         guessedInvoiceDate: s.bilag.guessedInvoiceDate,
+        guessedAmount: s.bilag.guessedAmount,
         status: s.bilag.status,
         score: s.score,
         attachments: s.bilag.attachments,

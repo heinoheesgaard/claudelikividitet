@@ -14,6 +14,7 @@ type MatchCandidate = {
   senderEmail: string;
   receivedAt: string;
   guessedInvoiceDate: string | null;
+  guessedAmount: number | null;
   status: string;
   score: number;
   attachments: MatchAttachment[];
@@ -242,6 +243,20 @@ export default function BilagAfstemningPage() {
                       {r.matches[0].guessedInvoiceDate
                         ? ` (faktura ${formatDate(r.matches[0].guessedInvoiceDate)}, modtaget ${formatDate(r.matches[0].receivedAt)})`
                         : ` (modtaget ${formatDate(r.matches[0].receivedAt)})`}
+                      {r.matches[0].guessedAmount != null && (
+                        <span
+                          className={
+                            Math.abs(r.matches[0].guessedAmount - Math.abs(r.amount)) <= 1
+                              ? " text-emerald-700 font-medium"
+                              : " text-slate-500"
+                          }
+                        >
+                          {" "}
+                          · gættet beløb {formatDKK(r.matches[0].guessedAmount)}
+                          {Math.abs(r.matches[0].guessedAmount - Math.abs(r.amount)) <= 1 &&
+                            " ✓ matcher"}
+                        </span>
+                      )}
                       {r.matches[0].attachments.length > 0 ? (
                         <span className="ml-2 inline-flex flex-wrap gap-2">
                           {r.matches[0].attachments.map((a) => (
