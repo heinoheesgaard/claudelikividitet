@@ -133,21 +133,21 @@ export default function BilagAfstemningPage() {
 
       {results && (
         <>
-          <section className="bg-red-50 border border-red-200 rounded-lg p-6">
-            <h2 className="text-lg font-semibold text-red-900 mb-1">
+          <section className="bg-amber-400 border-2 border-amber-600 rounded-lg p-6">
+            <h2 className="text-lg font-bold text-black mb-1">
               ❌ Ikke fundet i Bilag-indbakken ({notFound.length})
             </h2>
-            <p className="text-sm text-red-700 mb-4">
+            <p className="text-sm text-black mb-4">
               Disse mangler sandsynligvis stadig — bed om kvittering igen, eller tjek om de er
               sendt til en anden adresse.
             </p>
             {notFound.length === 0 ? (
-              <p className="text-sm text-red-700">Alle rækker blev matchet. 🎉</p>
+              <p className="text-sm text-black">Alle rækker blev matchet. 🎉</p>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="text-left text-red-800 border-b border-red-200">
+                    <tr className="text-left text-black border-b-2 border-amber-700">
                       <th className="py-2 pr-4">Bilag #</th>
                       <th className="py-2 pr-4">Dato</th>
                       <th className="py-2 pr-4">Tekst</th>
@@ -156,7 +156,7 @@ export default function BilagAfstemningPage() {
                   </thead>
                   <tbody>
                     {notFound.map((r) => (
-                      <tr key={r.bilagNumber} className="border-b border-red-100">
+                      <tr key={r.bilagNumber} className="border-b border-amber-500 text-black">
                         <td className="py-2 pr-4 font-mono">{r.bilagNumber}</td>
                         <td className="py-2 pr-4">{formatDate(r.date)}</td>
                         <td className="py-2 pr-4">{r.text}</td>
