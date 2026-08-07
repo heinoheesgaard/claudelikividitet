@@ -278,6 +278,28 @@ async function ocrImageText(data: Uint8Array): Promise<string> {
   return text;
 }
 
+// A cold worker paying Tesseract's one-off language-data download can take
+// a long time, and callers (a serverless request, a batch loop) have their
+// own time budgets to respect — cap how long any single OCR call is allowed
+// to block so it can never eat an entire request by itself.
+const OCR_TIMEOUT_MS = 20_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      () => {
+        clearTimeout(timer);
+        resolve(null);
+      },
+    );
+  });
+}
+
 const IMAGE_EXTENSIONS = /\.(jpe?g|png|webp|gif|bmp|tiff?)$/i;
 
 // Diagnostic helper: returns the raw text Julia extracts before any
@@ -329,7 +351,11 @@ export async function guessInvoiceDetails(
   );
   if (image) {
     try {
-      const text = await ocrImageText(image.data);
+      const text = await withTimeout(ocrImageText(image.data), OCR_TIMEOUT_MS);
+      if (text === null) {
+        console.error("OCR timed out after", OCR_TIMEOUT_MS, "ms");
+        return EMPTY_GUESS;
+      }
       return buildGuessFromText(text);
     } catch (error) {
       console.error("Could not OCR invoice image", error);
