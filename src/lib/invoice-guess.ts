@@ -72,6 +72,23 @@ function extractLineAmounts(line: string): AmountMatch[] {
   return results;
 }
 
+// A line that is *only* a money amount (with an optional currency marker),
+// nothing else — e.g. "7.830,00" or "DKK 1.449,00" on its own line.
+function isAmountOnlyLine(line: string): boolean {
+  return /^(?:dkk|kr\.?|eur|usd|gbp|[$€£])?\s*\d{1,3}(?:[.,]\d{3})*[.,]\d{2}\s*(?:dkk|kr\.?|eur|usd|gbp|[$€£])?$/i.test(
+    line.trim(),
+  );
+}
+
+// A line that is *only* a label, ending in a colon, with no amount of its
+// own — e.g. "Subtotal :" or "Total DKK :". Deliberately narrow (must end in
+// ":") so it doesn't also catch unrelated dotted-leader metadata lines like
+// "Fakturanr. ..............." or stray value lines like ": Jesper Hansen".
+function isLabelOnlyLine(line: string): boolean {
+  const t = line.trim();
+  return t.length > 0 && /:\s*$/.test(t) && extractLineAmounts(t).length === 0;
+}
+
 function findLabeledAmounts(text: string, labels: string[]): AmountMatch[] {
   // \b boundaries stop "total" from matching inside "subtotal", or "beløb"
   // inside "nettobeløb".
@@ -112,6 +129,33 @@ function findLabeledAmounts(text: string, labels: string[]): AmountMatch[] {
     if (sameLineAmounts.length > 0) {
       matches.push(sameLineAmounts[sameLineAmounts.length - 1]);
       continue;
+    }
+
+    // Stacked label/value blocks: several bare labels are listed one per
+    // line ("Subtotal :" / "25,00% moms :" / "Total DKK :"), immediately
+    // followed by the same number of bare amount lines in the same order
+    // ("7.830,00" / "1.957,50" / "9.787,50") — pair them up by position,
+    // since the *n*th label always corresponds to the *n*th value here, not
+    // necessarily the line right after it.
+    if (isLabelOnlyLine(line)) {
+      let blockStart = i;
+      while (blockStart > 0 && isLabelOnlyLine(lines[blockStart - 1])) blockStart--;
+      let blockEnd = i;
+      while (blockEnd + 1 < lines.length && isLabelOnlyLine(lines[blockEnd + 1])) blockEnd++;
+
+      const positionInBlock = i - blockStart;
+      const valueLines: string[] = [];
+      for (let j = blockEnd + 1; j < lines.length && isAmountOnlyLine(lines[j]); j++) {
+        valueLines.push(lines[j]);
+      }
+
+      if (valueLines.length === blockEnd - blockStart + 1 && positionInBlock < valueLines.length) {
+        const paired = extractLineAmounts(valueLines[positionInBlock]);
+        if (paired.length > 0) {
+          matches.push(paired[paired.length - 1]);
+          continue;
+        }
+      }
     }
 
     // Table form: the label is a column header ("Vare beløb  Moms  ...
