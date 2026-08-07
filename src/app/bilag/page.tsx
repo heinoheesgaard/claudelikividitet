@@ -339,6 +339,14 @@ function BilagRow({
                   📎 {a.filename}
                 </a>
               ))}
+              <a
+                href={`/api/bilag/${bilag.id}/raw-text`}
+                target="_blank"
+                rel="noreferrer"
+                className="text-slate-400 hover:underline"
+              >
+                🔍 vis rå tekst
+              </a>
             </p>
           ) : (
             attachmentNames.length > 0 && (
