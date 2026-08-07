@@ -174,7 +174,43 @@ function findLabeledAmounts(text: string, labels: string[]): AmountMatch[] {
   return matches;
 }
 
+// A Danish invoice's VAT math is a strong, layout-independent signal: the
+// grand total always equals subtotal + VAT, and VAT is (almost always) a
+// flat 25% of the subtotal. Scanning for three numbers anywhere in the
+// document that satisfy both relationships finds the total reliably even
+// when labels are missing, worded unexpectedly, or scattered around the
+// page in an order the text-based heuristics below can't follow — this
+// isn't tied to any particular label, wording, or layout at all.
+function findArithmeticTotal(text: string): AmountMatch | null {
+  const amounts = extractLineAmounts(text);
+  const values = [...new Set(amounts.map((m) => m.amount))];
+
+  let best: number | null = null;
+  for (const subtotal of values) {
+    if (subtotal < 1) continue; // avoid trivial matches around zero
+    const expectedVat = subtotal * 0.25;
+    const tolerance = Math.max(0.5, subtotal * 0.01);
+    const vat = values.find((v) => Math.abs(v - expectedVat) <= tolerance);
+    if (vat === undefined) continue;
+    const total = values.find((v) => Math.abs(v - (subtotal + vat)) <= 0.5);
+    if (total === undefined) continue;
+    if (best === null || total > best) best = total;
+  }
+
+  if (best === null) return null;
+  const currency = amounts.find((m) => m.amount === best)?.currency ?? null;
+  return { amount: best, currency };
+}
+
 function guessAmountFromText(text: string): AmountMatch | null {
+  // Try the VAT-math check first — when it finds a valid subtotal/VAT/total
+  // triple, that's more trustworthy than pattern-matching label text, since
+  // it doesn't depend on any particular wording or layout.
+  const arithmetic = findArithmeticTotal(text);
+  if (arithmetic) {
+    return arithmetic;
+  }
+
   // The final total is usually the last "strong" label mentioned in reading
   // order (it comes after any subtotal/VAT lines), not necessarily the
   // largest number on the page.
