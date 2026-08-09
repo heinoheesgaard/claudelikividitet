@@ -4,5 +4,9 @@
       "path": "/api/cron/sync-bilag",
       "schedule": "0 5 * * *"
     }
-  ]
+  ],
+  "functions": {
+    "src/app/api/bilag/**/route.ts": { "memory": 3009 },
+    "src/app/api/cron/sync-bilag/route.ts": { "memory": 3009 }
+  }
 }

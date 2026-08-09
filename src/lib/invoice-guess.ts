@@ -343,15 +343,48 @@ let ocrWorkerPromise: Promise<TesseractWorker> | null = null;
 // write a copy back to that same read-only directory afterwards.
 const TESSDATA_PATH = path.join(process.cwd(), "src", "lib", "tessdata");
 
+// If worker creation itself never settles (e.g. worker_threads misbehaving in
+// this specific serverless environment), the module-level cache below would
+// otherwise hold a permanently-broken pending promise for the rest of this
+// container's lifetime — every later request on the same warm instance would
+// silently inherit the same stuck worker instead of getting a fresh attempt.
+// Race it against its own timeout and reset the cache on either a timeout or
+// a real rejection so the next call starts clean.
+const WORKER_INIT_TIMEOUT_MS = 15_000;
+
 function getOcrWorker(): Promise<TesseractWorker> {
   if (!ocrWorkerPromise) {
-    ocrWorkerPromise = import("tesseract.js").then(({ createWorker }) =>
+    console.log("[ocr] creating tesseract worker, langPath =", TESSDATA_PATH);
+    const startedAt = Date.now();
+    const created = import("tesseract.js").then(({ createWorker }) =>
       createWorker("dan+eng", undefined, {
         langPath: TESSDATA_PATH,
         gzip: true,
         cacheMethod: "none",
       }),
     );
+
+    ocrWorkerPromise = new Promise<TesseractWorker>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        console.error(`[ocr] worker creation did not settle within ${WORKER_INIT_TIMEOUT_MS}ms`);
+        ocrWorkerPromise = null;
+        reject(new Error("OCR worker creation timed out"));
+      }, WORKER_INIT_TIMEOUT_MS);
+
+      created.then(
+        (worker) => {
+          clearTimeout(timer);
+          console.log(`[ocr] worker ready after ${Date.now() - startedAt}ms`);
+          resolve(worker);
+        },
+        (error) => {
+          clearTimeout(timer);
+          console.error("[ocr] worker creation failed", error);
+          ocrWorkerPromise = null;
+          reject(error);
+        },
+      );
+    });
   }
   return ocrWorkerPromise;
 }
@@ -366,27 +399,35 @@ function getOcrWorker(): Promise<TesseractWorker> {
 // with. Falls back to the original bytes if preprocessing itself fails (e.g.
 // a corrupt or unsupported image), so OCR still gets a chance to run.
 async function preprocessImageForOcr(data: Uint8Array): Promise<Buffer> {
+  const startedAt = Date.now();
   try {
     const sharp = (await import("sharp")).default;
-    return await sharp(Buffer.from(data))
+    const result = await sharp(Buffer.from(data))
       .rotate()
       .resize({ width: 2000, height: 2000, fit: "inside", withoutEnlargement: true })
       .greyscale()
       .normalize()
       .png()
       .toBuffer();
+    console.log(
+      `[ocr] preprocessed image in ${Date.now() - startedAt}ms (${data.length} -> ${result.length} bytes)`,
+    );
+    return result;
   } catch (error) {
-    console.error("Image preprocessing before OCR failed, using original bytes", error);
+    console.error("[ocr] image preprocessing failed, using original bytes", error);
     return Buffer.from(data);
   }
 }
 
 async function ocrImageText(data: Uint8Array): Promise<string> {
+  console.log(`[ocr] starting recognition, input ${data.length} bytes`);
   const worker = await getOcrWorker();
   const image = await preprocessImageForOcr(data);
+  const startedAt = Date.now();
   const {
     data: { text },
   } = await worker.recognize(image);
+  console.log(`[ocr] recognize() finished in ${Date.now() - startedAt}ms, ${text.length} chars`);
   return text;
 }
 
