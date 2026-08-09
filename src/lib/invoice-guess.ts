@@ -33,19 +33,31 @@ const DATE_RE = /\b(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})\b/g;
 
 // Matches a money amount in either Danish (1.234,56) or international
 // (1,234.56 / 22.50) notation, with group 2 flagging a trailing "%" so
-// callers can exclude VAT rates written the same way ("25,00 %").
-const LINE_AMOUNT_RE = /(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})(\s*%)?/g;
+// callers can exclude VAT rates written the same way ("25,00 %"). Whole-krone
+// invoices sometimes drop the decimals entirely ("9.600" instead of
+// "9.600,00"), so a thousands-grouped number is matched even with no
+// decimal part — but a bare number needs a decimal (".xx"/",xx") to count,
+// so unrelated IDs (CVR numbers, account numbers, postal codes) aren't
+// mistaken for amounts. The trailing lookahead rejects a match immediately
+// followed by another separator + 4 digits, since that's a date written
+// like "31.07.2026" ("31.07" alone would otherwise look like a valid
+// 2-decimal amount), not a price.
+const LINE_AMOUNT_RE = /(\d{1,3}(?:[.,]\d{3})+(?:[.,]\d{2})?|\d{1,3}[.,]\d{2})(?![.,]\d{4})(\s*%)?/g;
 
 function parseAmount(raw: string): number {
-  // Whichever separator appears last is the decimal point; the other kind
-  // (if any) is a thousands separator to strip. Handles "1.234,56" (Danish),
-  // "1,234.56" (international) and plain "22.50" / "22,50" alike.
-  const lastComma = raw.lastIndexOf(",");
-  const lastDot = raw.lastIndexOf(".");
-  if (lastComma > lastDot) {
-    return Number(raw.replace(/\./g, "").replace(",", "."));
+  // A trailing separator followed by exactly 2 digits is the decimal point
+  // — everything before it, including any other separators, is thousands
+  // grouping to strip. Without that trailing 2-digit group (e.g. "9.600"),
+  // there's no decimal part at all: every separator is thousands grouping.
+  // Handles "1.234,56" (Danish), "1,234.56" (international), "22.50" and
+  // whole-krone "9.600" (nine thousand six hundred) alike.
+  if (/[.,]\d{2}$/.test(raw)) {
+    const lastSepIndex = Math.max(raw.lastIndexOf(","), raw.lastIndexOf("."));
+    const integerPart = raw.slice(0, lastSepIndex).replace(/[.,]/g, "");
+    const decimalPart = raw.slice(lastSepIndex + 1);
+    return Number(`${integerPart}.${decimalPart}`);
   }
-  return Number(raw.replace(/,/g, ""));
+  return Number(raw.replace(/[.,]/g, ""));
 }
 
 function detectCurrency(context: string): string | null {
@@ -202,7 +214,28 @@ function findArithmeticTotal(text: string): AmountMatch | null {
   return { amount: best, currency };
 }
 
-function guessAmountFromText(text: string): AmountMatch | null {
+// Dates ("31.07.2026", "17-08-26") use the same punctuation as thousands
+// groupings, so a fragment like "31.07" can otherwise be misread as a
+// 2-decimal amount. Blanking out recognizable dates first — before any
+// amount matching runs — is far more reliable than trying to reject those
+// fragments after the fact with lookaheads, since a rejected match can
+// still cause the regex to backtrack into a *different* wrong reading of
+// the same digits (e.g. "31.07.2026" → rejected "31.07" → backtracks into
+// "07.202" being misread as a thousands-grouped amount).
+const DATE_MASK_RE = /\b(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{2,4})\b/g;
+
+function maskDates(text: string): string {
+  return text.replace(DATE_MASK_RE, (match, day: string, month: string) => {
+    const d = Number(day);
+    const m = Number(month);
+    if (d < 1 || d > 31 || m < 1 || m > 12) return match;
+    return " ".repeat(match.length);
+  });
+}
+
+function guessAmountFromText(rawText: string): AmountMatch | null {
+  const text = maskDates(rawText);
+
   // Try the VAT-math check first — when it finds a valid subtotal/VAT/total
   // triple, that's more trustworthy than pattern-matching label text, since
   // it doesn't depend on any particular wording or layout.
