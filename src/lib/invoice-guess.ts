@@ -356,11 +356,37 @@ function getOcrWorker(): Promise<TesseractWorker> {
   return ocrWorkerPromise;
 }
 
+// Phone photos routinely come in at 3000-4000px on the long side — Tesseract's
+// recognition time scales with pixel count, so feeding it a full-resolution
+// photo can take far longer than our OCR_TIMEOUT_MS even once the CDN-fetch
+// hang (fixed above) is gone. Downscaling to a resolution that's still easily
+// readable keeps recognition fast and consistent regardless of the source
+// photo's size. Greyscale + normalize also helps Tesseract on photos with
+// uneven lighting/shadows, which a scanned/exported PDF never has to deal
+// with. Falls back to the original bytes if preprocessing itself fails (e.g.
+// a corrupt or unsupported image), so OCR still gets a chance to run.
+async function preprocessImageForOcr(data: Uint8Array): Promise<Buffer> {
+  try {
+    const sharp = (await import("sharp")).default;
+    return await sharp(Buffer.from(data))
+      .rotate()
+      .resize({ width: 2000, height: 2000, fit: "inside", withoutEnlargement: true })
+      .greyscale()
+      .normalize()
+      .png()
+      .toBuffer();
+  } catch (error) {
+    console.error("Image preprocessing before OCR failed, using original bytes", error);
+    return Buffer.from(data);
+  }
+}
+
 async function ocrImageText(data: Uint8Array): Promise<string> {
   const worker = await getOcrWorker();
+  const image = await preprocessImageForOcr(data);
   const {
     data: { text },
-  } = await worker.recognize(Buffer.from(data));
+  } = await worker.recognize(image);
   return text;
 }
 
@@ -406,7 +432,14 @@ export async function extractRawText(
     (a) => a.contentType.startsWith("image/") || IMAGE_EXTENSIONS.test(a.filename),
   );
   if (image) {
-    const text = await ocrImageText(image.data);
+    const text = await withTimeout(ocrImageText(image.data), OCR_TIMEOUT_MS);
+    if (text === null) {
+      return {
+        source: "image",
+        filename: image.filename,
+        text: `[OCR timed out efter ${OCR_TIMEOUT_MS / 1000}s]`,
+      };
+    }
     return { source: "image", filename: image.filename, text };
   }
 
