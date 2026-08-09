@@ -3,7 +3,35 @@ import type { gmail_v1 } from "googleapis";
 import { getGmailClient } from "@/lib/gmail-client";
 import { storeBilag } from "@/lib/bilag-store";
 
-const TIME_BUDGET_MS = 45_000;
+// Vercel hard-kills the function at 60s (maxDuration). The per-item check
+// below only runs *before* starting a message, so it must stop with enough
+// runway left for the slowest possible single message — a photographed
+// receipt needing OCR (up to OCR_TIMEOUT_MS=20s in invoice-guess.ts) plus
+// Gmail API round-trips to fetch the message and its attachments. 45s left
+// only a 15s cushion, which a slow message could still blow through,
+// producing exactly the 504 this budget is meant to prevent. 20s leaves a
+// much safer margin.
+const TIME_BUDGET_MS = 20_000;
+const PER_ITEM_TIMEOUT_MS = 25_000;
+
+// Caps how long we wait on a single message so a stuck Gmail call or OCR
+// job can't eat the whole request — on timeout we move on and leave it for
+// the next sync run (it isn't stored yet, so it'll be picked up again).
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      () => {
+        clearTimeout(timer);
+        resolve(null);
+      },
+    );
+  });
+}
 
 // Sentinel returned/accepted in place of a real Gmail pageToken when we have
 // to stop mid-way through the very first page (which has no token of its
@@ -132,7 +160,11 @@ export async function syncBilagFromGmail(options: {
         break outer;
       }
       if (!message.id) continue;
-      const result = await processMessage(gmail, message.id);
+      const result = await withTimeout(processMessage(gmail, message.id), PER_ITEM_TIMEOUT_MS);
+      if (!result) {
+        // Timed out — nothing was stored, so a later sync run will retry it.
+        continue;
+      }
       processed += 1;
       if (result.skipped) {
         skipped += 1;
