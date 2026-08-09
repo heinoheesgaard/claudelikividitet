@@ -5,6 +5,16 @@ import { storeBilag } from "@/lib/bilag-store";
 
 const TIME_BUDGET_MS = 45_000;
 
+// Sentinel returned/accepted in place of a real Gmail pageToken when we have
+// to stop mid-way through the very first page (which has no token of its
+// own — Gmail's list call takes `pageToken: undefined` for page one). The
+// client-side polling loop only continues while `nextPageToken` is truthy,
+// so plain `undefined`/`null` would be read as "done" even though most of
+// the page is still unprocessed. Resuming re-lists the same page from
+// scratch; already-stored messages are cheaply skipped by storeBilag's
+// dedup check, so re-fetching them is wasted API calls but not wasted OCR.
+const RESUME_FIRST_PAGE = "__resume_first_page__";
+
 function headerValue(
   headers: gmail_v1.Schema$MessagePartHeader[] | undefined,
   name: string,
@@ -97,7 +107,7 @@ export async function syncBilagFromGmail(options: {
   const gmail = getGmailClient();
   const startedAt = Date.now();
 
-  let pageToken = options.pageToken;
+  let pageToken = options.pageToken === RESUME_FIRST_PAGE ? undefined : options.pageToken;
   let processed = 0;
   let created = 0;
   let skipped = 0;
@@ -105,7 +115,8 @@ export async function syncBilagFromGmail(options: {
   let pagesFetched = 0;
   let nextPageToken: string | null = null;
 
-  while (true) {
+  outer: while (true) {
+    const currentPageToken = pageToken;
     const listRes = await gmail.users.messages.list({
       userId: "me",
       q: `to:${recipient} newer_than:${options.days}d`,
@@ -116,6 +127,10 @@ export async function syncBilagFromGmail(options: {
 
     const messages = listRes.data.messages ?? [];
     for (const message of messages) {
+      if (Date.now() - startedAt >= TIME_BUDGET_MS) {
+        nextPageToken = currentPageToken ?? RESUME_FIRST_PAGE;
+        break outer;
+      }
       if (!message.id) continue;
       const result = await processMessage(gmail, message.id);
       processed += 1;
