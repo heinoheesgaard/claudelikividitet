@@ -8,11 +8,16 @@ import type { NextConfig } from "next";
 // thread's own `require()` then fails inside its isolated context without
 // surfacing an error to the main thread, which just looks like OCR hanging
 // forever. Force-include them for every route that can reach OCR (directly,
-// or via storeBilag -> guessInvoiceDetails).
+// or via storeBilag -> guessInvoiceDetails). Also includes the bundled
+// Danish/English traineddata (src/lib/tessdata) — without it tesseract.js
+// falls back to downloading language data from jsdelivr's CDN on every
+// cold serverless invocation, which is what was actually causing OCR to
+// hang until its own timeout on every single call in production.
 const tesseractIncludes = [
   "./node_modules/tesseract.js/**/*",
   "./node_modules/tesseract.js-core/**/*",
   "./node_modules/wasm-feature-detect/**/*",
+  "./src/lib/tessdata/**/*",
 ];
 
 const nextConfig: NextConfig = {

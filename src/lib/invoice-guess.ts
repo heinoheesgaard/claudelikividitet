@@ -1,4 +1,5 @@
 import "server-only";
+import path from "node:path";
 import { extractText } from "unpdf";
 import type { Worker as TesseractWorker } from "tesseract.js";
 
@@ -330,10 +331,26 @@ function buildGuessFromText(text: string): GuessedDetails {
 // guessing, which doesn't need it at all.
 let ocrWorkerPromise: Promise<TesseractWorker> | null = null;
 
+// Without an explicit langPath, tesseract.js downloads the Danish/English
+// traineddata from jsdelivr's CDN on every cold start — and since every
+// serverless invocation can be a fresh container with nothing cached, that
+// network fetch was happening on every single OCR call. In production this
+// was consistently hanging until our own OCR_TIMEOUT_MS cut it off, which is
+// why "OCR timed out after 20000 ms" showed up on every attempt rather than
+// just cold starts. Pointing langPath at the bundled copy (kept in sync with
+// next.config.ts's tessdata tracing include) reads the trained data straight
+// off disk instead. cacheMethod "none" skips tesseract.js's own attempt to
+// write a copy back to that same read-only directory afterwards.
+const TESSDATA_PATH = path.join(process.cwd(), "src", "lib", "tessdata");
+
 function getOcrWorker(): Promise<TesseractWorker> {
   if (!ocrWorkerPromise) {
     ocrWorkerPromise = import("tesseract.js").then(({ createWorker }) =>
-      createWorker("dan+eng"),
+      createWorker("dan+eng", undefined, {
+        langPath: TESSDATA_PATH,
+        gzip: true,
+        cacheMethod: "none",
+      }),
     );
   }
   return ocrWorkerPromise;
