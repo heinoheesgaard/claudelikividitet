@@ -350,7 +350,18 @@ const TESSDATA_PATH = path.join(process.cwd(), "src", "lib", "tessdata");
 // silently inherit the same stuck worker instead of getting a fresh attempt.
 // Race it against its own timeout and reset the cache on either a timeout or
 // a real rejection so the next call starts clean.
-const WORKER_INIT_TIMEOUT_MS = 15_000;
+//
+// Production logs showed worker creation alone — spawning a worker_thread
+// and instantiating a several-MB WASM engine off Vercel's deployment
+// filesystem on a cold container — taking longer than the 15s this used to
+// be, on an image that finished in ~1s once the same code ran locally. That
+// gap points at cold-start I/O being much slower on Vercel than on local
+// disk, not a genuine hang, so this is raised to give a cold worker real
+// room to finish rather than always cutting it off before we find out.
+// Batch callers (gmail-sync, guess-backfill) are unaffected: their own
+// tighter per-item timeout around the whole OCR call still applies on top
+// of this and will cut in first.
+const WORKER_INIT_TIMEOUT_MS = 40_000;
 
 function getOcrWorker(): Promise<TesseractWorker> {
   if (!ocrWorkerPromise) {
@@ -434,8 +445,17 @@ async function ocrImageText(data: Uint8Array): Promise<string> {
 // A cold worker paying Tesseract's one-off language-data download can take
 // a long time, and callers (a serverless request, a batch loop) have their
 // own time budgets to respect — cap how long any single OCR call is allowed
-// to block so it can never eat an entire request by itself.
+// to block so it can never eat an entire request by itself. Batch callers
+// (gmail-sync, guess-backfill) use this tighter budget since they process
+// several bilag per request and need to leave room for the rest of the page.
 const OCR_TIMEOUT_MS = 20_000;
+
+// The raw-text diagnostic handles exactly one image per request with no
+// other work competing for the route's 60s maxDuration, so it can afford to
+// actually wait out a slow cold worker instead of cutting it off at the same
+// tight budget batch callers need — the whole point of raising this is to
+// find out how long a cold start really takes instead of guessing.
+const DIAGNOSTIC_OCR_TIMEOUT_MS = 50_000;
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
   return new Promise((resolve) => {
@@ -473,12 +493,12 @@ export async function extractRawText(
     (a) => a.contentType.startsWith("image/") || IMAGE_EXTENSIONS.test(a.filename),
   );
   if (image) {
-    const text = await withTimeout(ocrImageText(image.data), OCR_TIMEOUT_MS);
+    const text = await withTimeout(ocrImageText(image.data), DIAGNOSTIC_OCR_TIMEOUT_MS);
     if (text === null) {
       return {
         source: "image",
         filename: image.filename,
-        text: `[OCR timed out efter ${OCR_TIMEOUT_MS / 1000}s]`,
+        text: `[OCR timed out efter ${DIAGNOSTIC_OCR_TIMEOUT_MS / 1000}s]`,
       };
     }
     return { source: "image", filename: image.filename, text };
