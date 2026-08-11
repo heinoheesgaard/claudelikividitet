@@ -57,6 +57,14 @@ const STRONG_LABELS = [
   "total",
 ];
 const WEAK_LABELS = ["beløb", "sum"];
+
+// POS receipts always end with a payment line ("DANKORT 124,00", "KONTANT
+// 50,00") showing the exact amount actually charged — as reliable an
+// indicator of the true total as any "at betale" label, and a useful
+// fallback when OCR on a photographed receipt garbles the digits right
+// after the "at betale" line itself (the label text survives more often
+// than the tightly-kerned number next to it).
+const PAYMENT_LABELS = ["dankort", "kontant", "mobilepay", "visa", "mastercard", "girocard"];
 const DATE_RE = /\b(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})\b/g;
 
 // Matches a money amount in either Danish (1.234,56) or international
@@ -278,6 +286,11 @@ function guessAmountFromText(rawText: string): AmountMatch | null {
   const strong = findLabeledAmounts(text, STRONG_LABELS);
   if (strong.length > 0) {
     return strong[strong.length - 1];
+  }
+
+  const payment = findLabeledAmounts(text, PAYMENT_LABELS);
+  if (payment.length > 0) {
+    return payment[payment.length - 1];
   }
 
   const weak = findLabeledAmounts(text, WEAK_LABELS);
