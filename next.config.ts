@@ -13,10 +13,32 @@ import type { NextConfig } from "next";
 // falls back to downloading language data from jsdelivr's CDN on every
 // cold serverless invocation, which is what was actually causing OCR to
 // hang until its own timeout on every single call in production.
+// Now that tesseract.js is excluded from bundling (serverExternalPackages,
+// below) it's required via a plain, real require() at runtime — which means
+// every package IT requires must also exist as real files on disk, not just
+// tesseract.js itself. bmp-js was the first case found in production:
+// tesseract.js's own image-format handling requires it lazily/conditionally,
+// which static tracing can't always follow (the same class of gap that
+// affected tesseract.js-core and wasm-feature-detect). Rather than keep
+// discovering these one deploy at a time, this is the full transitive
+// closure of tesseract.js's own package.json dependencies, computed by
+// walking each dependency's package.json recursively.
 const tesseractIncludes = [
   "./node_modules/tesseract.js/**/*",
   "./node_modules/tesseract.js-core/**/*",
   "./node_modules/wasm-feature-detect/**/*",
+  "./node_modules/bmp-js/**/*",
+  "./node_modules/idb-keyval/**/*",
+  "./node_modules/is-url/**/*",
+  "./node_modules/node-fetch/**/*",
+  "./node_modules/opencollective-postinstall/**/*",
+  "./node_modules/regenerator-runtime/**/*",
+  "./node_modules/zlibjs/**/*",
+  "./node_modules/data-uri-to-buffer/**/*",
+  "./node_modules/fetch-blob/**/*",
+  "./node_modules/formdata-polyfill/**/*",
+  "./node_modules/node-domexception/**/*",
+  "./node_modules/web-streams-polyfill/**/*",
   "./src/lib/tessdata/**/*",
 ];
 
