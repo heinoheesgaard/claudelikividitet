@@ -3,6 +3,33 @@ import path from "node:path";
 import { extractText } from "unpdf";
 import type { Worker as TesseractWorker } from "tesseract.js";
 
+// tesseract.js's Node worker setup does `worker.onerror = handler` to be
+// notified if the spawned worker_thread fails to start (e.g. a missing
+// module inside it). That's the browser Worker API's convention; Node's
+// worker_threads.Worker is a plain EventEmitter and simply ignores a bare
+// `.onerror` property assignment — confirmed directly: a worker that fails
+// to load never fires it, so tesseract.js's own createWorker() promise never
+// rejects and just hangs forever. In production this meant ANY worker
+// startup failure (not just slowness) was indistinguishable from a slow
+// cold start — both looked like "stuck loading" until our own external
+// timeout fired. Patch Worker.prototype once so `.onerror = fn` actually
+// forwards to the real `.on('error', fn)`, giving tesseract.js the prompt,
+// real rejection it was always supposed to get.
+let workerThreadsPatched = false;
+async function patchWorkerThreadsOnError() {
+  if (workerThreadsPatched) return;
+  workerThreadsPatched = true;
+  const { Worker } = await import("node:worker_threads");
+  if (!Object.getOwnPropertyDescriptor(Worker.prototype, "onerror")) {
+    Object.defineProperty(Worker.prototype, "onerror", {
+      configurable: true,
+      set(this: InstanceType<typeof Worker>, handler: (error: Error) => void) {
+        this.on("error", handler);
+      },
+    });
+  }
+}
+
 // A classic Danish invoice's totals section reads, in this order:
 //   Beløb ekskl. moms (subtotal)  ->  Moms 25% (VAT, almost always a flat
 //   25% rate in Denmark)  ->  I alt / Total / At betale (grand total incl.
@@ -367,13 +394,15 @@ function getOcrWorker(): Promise<TesseractWorker> {
   if (!ocrWorkerPromise) {
     console.log("[ocr] creating tesseract worker, langPath =", TESSDATA_PATH);
     const startedAt = Date.now();
-    const created = import("tesseract.js").then(({ createWorker }) =>
-      createWorker("dan+eng", undefined, {
-        langPath: TESSDATA_PATH,
-        gzip: true,
-        cacheMethod: "none",
-      }),
-    );
+    const created = patchWorkerThreadsOnError()
+      .then(() => import("tesseract.js"))
+      .then(({ createWorker }) =>
+        createWorker("dan+eng", undefined, {
+          langPath: TESSDATA_PATH,
+          gzip: true,
+          cacheMethod: "none",
+        }),
+      );
 
     ocrWorkerPromise = new Promise<TesseractWorker>((resolve, reject) => {
       const timer = setTimeout(() => {
