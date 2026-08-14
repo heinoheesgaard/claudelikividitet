@@ -380,7 +380,7 @@ function BilagRow({
               min="0"
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
-              className={`border rounded-md px-2 py-1.5 text-sm w-28 ${
+              className={`border rounded-md px-2 py-1.5 text-sm w-28 text-slate-900 ${
                 bilag.guessedAmount != null ? "border-amber-300 bg-amber-50" : "border-slate-300"
               }`}
               placeholder="0,00"
@@ -429,7 +429,7 @@ function BilagRow({
             <input
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              className={`border rounded-md px-2 py-1.5 text-sm ${
+              className={`border rounded-md px-2 py-1.5 text-sm text-slate-900 ${
                 bilag.guessedVendor ? "border-amber-300 bg-amber-50" : "border-slate-300"
               }`}
               placeholder="Leverandør / note"
