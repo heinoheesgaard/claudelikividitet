@@ -2,6 +2,7 @@ import "server-only";
 import type { gmail_v1 } from "googleapis";
 import { getGmailClient } from "@/lib/gmail-client";
 import { storeBilag } from "@/lib/bilag-store";
+import { htmlToText } from "@/lib/html-to-text";
 
 // Vercel hard-kills the function at 60s (maxDuration). The per-item check
 // below only runs *before* starting a message, so it must stop with enough
@@ -67,6 +68,24 @@ function decodeBase64Url(data: string): Uint8Array<ArrayBuffer> {
   return Uint8Array.from(Buffer.from(normalized, "base64")) as Uint8Array<ArrayBuffer>;
 }
 
+// Some receipts (POS systems like Zettle) arrive with the receipt rendered
+// directly in the email body — no PDF or image attachment at all. Prefer the
+// plain-text part when present (already clean); fall back to stripping the
+// HTML part, since plenty of these emails are HTML-only.
+function extractBodyText(parts: gmail_v1.Schema$MessagePart[]): string | null {
+  const plainPart = parts.find(
+    (p) => p.mimeType === "text/plain" && !p.filename && p.body?.data,
+  );
+  if (plainPart?.body?.data) {
+    return Buffer.from(decodeBase64Url(plainPart.body.data)).toString("utf-8");
+  }
+  const htmlPart = parts.find((p) => p.mimeType === "text/html" && !p.filename && p.body?.data);
+  if (htmlPart?.body?.data) {
+    return htmlToText(Buffer.from(decodeBase64Url(htmlPart.body.data)).toString("utf-8"));
+  }
+  return null;
+}
+
 async function processMessage(gmail: gmail_v1.Gmail, messageId: string) {
   const msgRes = await gmail.users.messages.get({
     userId: "me",
@@ -83,6 +102,7 @@ async function processMessage(gmail: gmail_v1.Gmail, messageId: string) {
   const subject = headerValue(payload.headers, "Subject") ?? "";
   const receivedAt = msg.internalDate ? new Date(Number(msg.internalDate)) : new Date();
   const snippet = msg.snippet ?? null;
+  const bodyText = extractBodyText(allParts);
 
   const attachments = [];
   for (const part of allParts) {
@@ -109,6 +129,7 @@ async function processMessage(gmail: gmail_v1.Gmail, messageId: string) {
     senderEmail,
     subject,
     snippet,
+    bodyText,
     attachments,
   });
 }

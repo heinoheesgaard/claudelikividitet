@@ -22,7 +22,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   }));
 
   try {
-    const result = await extractRawText(attachments);
+    const result = await extractRawText(attachments, bilag.bodyText);
     return new NextResponse(
       `# ${bilag.subject}\n# kilde: ${result.source} (${result.filename ?? "ingen fil"})\n\n${result.text}`,
       { headers: { "Content-Type": "text/plain; charset=utf-8" } },

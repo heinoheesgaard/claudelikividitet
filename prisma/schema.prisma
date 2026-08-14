@@ -67,6 +67,7 @@ model Bilag {
   subject           String
   attachmentNames   String
   snippet           String?
+  bodyText          String?
   guessedVendor     String?
   guessedAmount     Float?
   guessedCurrency   String?

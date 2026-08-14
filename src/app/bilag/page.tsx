@@ -349,8 +349,22 @@ function BilagRow({
               </a>
             </p>
           ) : (
-            attachmentNames.length > 0 && (
-              <p className="text-xs text-slate-400 mt-1">📎 {attachmentNames.join(", ")}</p>
+            (attachmentNames.length > 0 || bilag.bodyText) && (
+              <p className="text-xs mt-1 flex flex-wrap items-center gap-2">
+                {attachmentNames.length > 0 && (
+                  <span className="text-slate-400">📎 {attachmentNames.join(", ")}</span>
+                )}
+                {bilag.bodyText && (
+                  <a
+                    href={`/api/bilag/${bilag.id}/raw-text`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-slate-400 hover:underline"
+                  >
+                    🔍 vis rå tekst (mailtekst)
+                  </a>
+                )}
+              </p>
             )
           )}
         </div>

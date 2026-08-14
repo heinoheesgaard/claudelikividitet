@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { storeBilag } from "@/lib/bilag-store";
+import { htmlToText } from "@/lib/html-to-text";
 
 type MailjetPart = {
   Headers?: Record<string, unknown>;
@@ -90,6 +91,13 @@ export async function POST(request: NextRequest) {
   const subject = payload.Subject ?? "";
   const receivedAt = parseMailjetDate(payload.Date);
   const snippet = (payload["Text-part"] ?? "").trim().slice(0, 500) || null;
+  // Some receipts (POS systems like Zettle) render the whole receipt in the
+  // email body with no attachment at all — capture the full text so amount
+  // guessing has something to read for those.
+  const bodyText =
+    (payload["Text-part"] ?? "").trim() ||
+    (payload["Html-part"] ? htmlToText(payload["Html-part"]) : "") ||
+    null;
 
   const attachments: { filename: string; contentType: string; data: Uint8Array<ArrayBuffer> }[] =
     [];
@@ -118,6 +126,7 @@ export async function POST(request: NextRequest) {
     senderEmail,
     subject,
     snippet,
+    bodyText,
     attachments,
   });
 

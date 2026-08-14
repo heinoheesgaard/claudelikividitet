@@ -71,7 +71,10 @@ export async function POST(request: NextRequest) {
           contentType: a.contentType,
           data: new Uint8Array(a.data) as Uint8Array<ArrayBuffer>,
         }));
-        const result = await withTimeout(guessInvoiceDetails(attachments), PER_ITEM_TIMEOUT_MS);
+        const result = await withTimeout(
+          guessInvoiceDetails(attachments, bilag.bodyText),
+          PER_ITEM_TIMEOUT_MS,
+        );
         processed += 1;
         lastSeenId = bilag.id;
 

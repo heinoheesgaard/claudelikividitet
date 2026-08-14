@@ -522,7 +522,8 @@ const IMAGE_EXTENSIONS = /\.(jpe?g|png|webp|gif|bmp|tiff?)$/i;
 // be inspected directly instead of guessing blind from a screenshot.
 export async function extractRawText(
   attachments: { filename: string; contentType: string; data: Uint8Array<ArrayBuffer> }[],
-): Promise<{ source: "pdf" | "image" | "none"; filename: string | null; text: string }> {
+  bodyText?: string | null,
+): Promise<{ source: "pdf" | "image" | "email-body" | "none"; filename: string | null; text: string }> {
   const pdf = attachments.find(
     (a) => a.contentType === "application/pdf" || a.filename.toLowerCase().endsWith(".pdf"),
   );
@@ -546,11 +547,18 @@ export async function extractRawText(
     return { source: "image", filename: image.filename, text };
   }
 
+  // No attachment at all — some receipts (POS systems like Zettle) render
+  // the whole receipt directly in the email body.
+  if (bodyText) {
+    return { source: "email-body", filename: null, text: bodyText };
+  }
+
   return { source: "none", filename: null, text: "" };
 }
 
 export async function guessInvoiceDetails(
   attachments: { filename: string; contentType: string; data: Uint8Array<ArrayBuffer> }[],
+  bodyText?: string | null,
 ): Promise<GuessedDetails> {
   const pdf = attachments.find(
     (a) => a.contentType === "application/pdf" || a.filename.toLowerCase().endsWith(".pdf"),
@@ -583,6 +591,13 @@ export async function guessInvoiceDetails(
       console.error("Could not OCR invoice image", error);
       return EMPTY_GUESS;
     }
+  }
+
+  // No attachment at all — some receipts (POS systems like Zettle) render
+  // the whole receipt directly in the email body, so that's all there is to
+  // read from.
+  if (bodyText) {
+    return buildGuessFromText(bodyText);
   }
 
   return EMPTY_GUESS;
