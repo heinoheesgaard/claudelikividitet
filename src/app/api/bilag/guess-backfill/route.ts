@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { guessInvoiceDetails } from "@/lib/invoice-guess";
+import { refetchBodyTextByMessageId } from "@/lib/gmail-sync";
 
 export const maxDuration = 60;
 
@@ -12,6 +13,7 @@ export const maxDuration = 60;
 const PAGE_SIZE = 10;
 const TIME_BUDGET_MS = 40_000;
 const PER_ITEM_TIMEOUT_MS = 20_000;
+const REFETCH_TIMEOUT_MS = 10_000;
 
 // Caps how long we wait on a single bilag's guess so one slow OCR job can't
 // eat the whole request — on timeout we just move on and leave it for the
@@ -71,8 +73,29 @@ export async function POST(request: NextRequest) {
           contentType: a.contentType,
           data: new Uint8Array(a.data) as Uint8Array<ArrayBuffer>,
         }));
+
+        // Bilag stored before body-text capture existed (no attachment, no
+        // bodyText) have nothing to guess from and never will unless we go
+        // fetch it — re-run "Gæt beløb nu" alone can't help them. Pull the
+        // body text from Gmail directly by the message's own Message-Id so
+        // these get fixed without anyone having to resend the email.
+        let bodyText = bilag.bodyText;
+        if (attachments.length === 0 && bodyText === null) {
+          try {
+            bodyText = await withTimeout(
+              refetchBodyTextByMessageId(bilag.emailMessageId),
+              REFETCH_TIMEOUT_MS,
+            );
+            if (bodyText) {
+              await prisma.bilag.update({ where: { id: bilag.id }, data: { bodyText } });
+            }
+          } catch (error) {
+            console.error("Could not re-fetch body text from Gmail", error);
+          }
+        }
+
         const result = await withTimeout(
-          guessInvoiceDetails(attachments, bilag.bodyText),
+          guessInvoiceDetails(attachments, bodyText),
           PER_ITEM_TIMEOUT_MS,
         );
         processed += 1;

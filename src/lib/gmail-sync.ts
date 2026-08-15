@@ -134,6 +134,33 @@ async function processMessage(gmail: gmail_v1.Gmail, messageId: string) {
   });
 }
 
+// Bilag already stored before body-text capture existed have no bodyText to
+// fall back on, and re-running "Gæt beløb nu" alone can't fix that — the
+// text was simply never saved. Re-fetch that specific message from Gmail by
+// its stored Message-Id header (via the rfc822msgid: search operator, which
+// looks it up directly rather than paging through the inbox) so a bilag
+// stuck at "Mangler beløb" with no attachment can be repaired without
+// anyone having to resend the email.
+export async function refetchBodyTextByMessageId(emailMessageId: string): Promise<string | null> {
+  const recipient = process.env.GMAIL_IMPERSONATE_EMAIL;
+  if (!recipient) return null;
+
+  const gmail = getGmailClient();
+  const listRes = await gmail.users.messages.list({
+    userId: "me",
+    q: `rfc822msgid:${emailMessageId}`,
+    maxResults: 1,
+  });
+  const messageId = listRes.data.messages?.[0]?.id;
+  if (!messageId) return null;
+
+  const msgRes = await gmail.users.messages.get({ userId: "me", id: messageId, format: "full" });
+  const payload = msgRes.data.payload;
+  if (!payload) return null;
+
+  return extractBodyText(flattenParts(payload));
+}
+
 export type SyncBilagResult = {
   processed: number;
   created: number;
