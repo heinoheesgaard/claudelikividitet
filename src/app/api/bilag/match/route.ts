@@ -19,6 +19,14 @@ const STOPWORDS = new Set([
   "mobpay",
   "aps",
   "com",
+  // Thypisk's own home town — shows up in nearly every piece of
+  // correspondence they have (their own address, a local vendor's address,
+  // a delivery address), so it does nothing to distinguish one purchase
+  // from another. Both spellings are needed: bank exports transliterate "ø"
+  // as "oe" ("VORUPOER"), while text read off an actual invoice keeps "ø".
+  "thisted",
+  "vorupør",
+  "vorupoer",
 ]);
 
 function significantWords(text: string): string[] {
@@ -109,16 +117,25 @@ export async function POST(request: NextRequest) {
 
         const haystack = `${c.subject} ${c.senderEmail} ${c.snippet ?? ""} ${c.attachmentNames}`
           .toLowerCase();
-        const score = words.filter((w) => haystack.includes(w)).length + dateBonus + amountBonus;
-        // A single incidental word match (e.g. the company's own home town
-        // showing up in an unrelated invoice's address) was enough to pass
-        // and become "the best match" whenever the real bilag either wasn't
-        // in the candidate pool or scored 0 itself — producing exactly the
-        // kind of confident-but-wrong match reported (completely different
-        // vendor, hundreds of kroner off). Requiring at least 2 keeps a
-        // strong amount match (bonus 8 or 20) or date match (bonus 5) on
-        // its own, but rules out one coincidental shared word by itself.
-        if (score < 2) return null;
+        const textMatchCount = words.filter((w) => haystack.includes(w)).length;
+        const score = textMatchCount + dateBonus + amountBonus;
+
+        // A raw "any positive score" bar let single, weak signals stand
+        // completely on their own — and a bank statement covering just a
+        // handful of days means *every* bilag received around then falls
+        // within the ±2-day dateBonus window, so "invoice date happens to be
+        // close" alone was matching the same bilag against every posting in
+        // the file regardless of amount or vendor. Require each signal type
+        // to actually corroborate another one, except an exact amount match,
+        // which is reliable enough (two independent records landing on the
+        // same kr-and-øre total) to stand alone.
+        const strongAmountMatch = amountDiff !== null && amountDiff <= 1;
+        const accept =
+          strongAmountMatch ||
+          (amountBonus > 0 && (dateBonus > 0 || textMatchCount > 0)) ||
+          textMatchCount >= 2 ||
+          (dateBonus > 0 && textMatchCount >= 1);
+        if (!accept) return null;
         return { bilag: c, score, daysSincePurchase, hasAttachment: c.attachments.length > 0 };
       })
       .filter((x): x is NonNullable<typeof x> => x !== null)
