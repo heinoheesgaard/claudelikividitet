@@ -2,7 +2,8 @@ export function formatDKK(amount: number): string {
   return new Intl.NumberFormat("da-DK", {
     style: "currency",
     currency: "DKK",
-    maximumFractionDigits: 0,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   }).format(amount);
 }
 

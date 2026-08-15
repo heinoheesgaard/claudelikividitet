@@ -346,7 +346,16 @@ export default function BilagAfstemningPage() {
             </div>
             {zipError && <p className="text-sm text-red-600 px-4 pt-3">{zipError}</p>}
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full text-sm table-fixed">
+                <colgroup>
+                  <col className="w-[10%]" />
+                  <col className="w-[24%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[24%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[10%]" />
+                  <col className="w-[8%]" />
+                </colgroup>
                 <thead className="bg-slate-50 text-xs text-slate-500 uppercase tracking-wide">
                   <tr className="text-left border-b border-slate-200">
                     <th className="py-2 pl-4 pr-3">Dato</th>
@@ -367,7 +376,9 @@ export default function BilagAfstemningPage() {
                           <td className="py-2 pl-4 pr-3 whitespace-nowrap text-slate-500">
                             {formatDate(r.date)}
                           </td>
-                          <td className="py-2 pr-3 text-slate-900">{r.text}</td>
+                          <td className="py-2 pr-3 text-slate-900 truncate" title={r.text}>
+                            {r.text}
+                          </td>
                           <td className="py-2 pr-3 text-right whitespace-nowrap font-medium text-slate-900">
                             {formatDKK(r.amount)}
                           </td>
@@ -395,11 +406,16 @@ export default function BilagAfstemningPage() {
                         <td className="py-2 pl-4 pr-3 whitespace-nowrap text-slate-500">
                           {formatDate(r.date)}
                         </td>
-                        <td className="py-2 pr-3 text-slate-900">{r.text}</td>
+                        <td className="py-2 pr-3 text-slate-900 truncate" title={r.text}>
+                          {r.text}
+                        </td>
                         <td className="py-2 pr-3 text-right whitespace-nowrap font-medium text-slate-900">
                           {formatDKK(r.amount)}
                         </td>
-                        <td className="py-2 pr-3 pl-3 border-l border-slate-200 text-slate-900">
+                        <td
+                          className="py-2 pr-3 pl-3 border-l border-slate-200 text-slate-900 truncate"
+                          title={m.subject}
+                        >
                           {m.subject}
                         </td>
                         <td
@@ -426,7 +442,8 @@ export default function BilagAfstemningPage() {
                                   href={`/api/bilag/attachments/${a.id}`}
                                   target="_blank"
                                   rel="noreferrer"
-                                  className="text-blue-600 hover:underline whitespace-nowrap"
+                                  title={a.filename}
+                                  className="text-blue-600 hover:underline truncate block"
                                 >
                                   📎 {a.filename}
                                 </a>
