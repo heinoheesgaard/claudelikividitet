@@ -110,7 +110,15 @@ export async function POST(request: NextRequest) {
         const haystack = `${c.subject} ${c.senderEmail} ${c.snippet ?? ""} ${c.attachmentNames}`
           .toLowerCase();
         const score = words.filter((w) => haystack.includes(w)).length + dateBonus + amountBonus;
-        if (score === 0) return null;
+        // A single incidental word match (e.g. the company's own home town
+        // showing up in an unrelated invoice's address) was enough to pass
+        // and become "the best match" whenever the real bilag either wasn't
+        // in the candidate pool or scored 0 itself — producing exactly the
+        // kind of confident-but-wrong match reported (completely different
+        // vendor, hundreds of kroner off). Requiring at least 2 keeps a
+        // strong amount match (bonus 8 or 20) or date match (bonus 5) on
+        // its own, but rules out one coincidental shared word by itself.
+        if (score < 2) return null;
         return { bilag: c, score, daysSincePurchase, hasAttachment: c.attachments.length > 0 };
       })
       .filter((x): x is NonNullable<typeof x> => x !== null)
