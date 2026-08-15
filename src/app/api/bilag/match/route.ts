@@ -43,12 +43,22 @@ export async function POST(request: NextRequest) {
   if (dates.length === 0) {
     return NextResponse.json({ error: "Ingen gyldige datoer i filen." }, { status: 400 });
   }
-  // A bilag can be submitted to revisorkurt long after the purchase date (late
-  // submission), but never before it — so the search window only needs a small
-  // buffer before the earliest purchase date, and can run all the way to today.
+  // A bilag can be submitted to revisorkurt after the purchase date (late
+  // submission), but rarely more than a few weeks after — bounding the
+  // window to the statement's own period (plus a buffer) keeps the
+  // candidate pool tight. Letting it run unbounded to "today" caused real
+  // problems: run this tool weeks or months after the statement's own dates
+  // (e.g. re-running an old period) and it pulls in every bilag received
+  // since, most of them unrelated — both diluting the "unmatched, safe to
+  // archive" list with irrelevant bilag, and inflating false-positive
+  // matches (an unrelated bilag's amount coincidentally landing close to a
+  // posting's amount, with nothing else in common).
   const minDate = new Date(Math.min(...dates.map((d) => d.getTime())));
   minDate.setDate(minDate.getDate() - 5);
-  const maxDate = new Date();
+  const latestRowDate = new Date(Math.max(...dates.map((d) => d.getTime())));
+  const latePlusBuffer = new Date(latestRowDate);
+  latePlusBuffer.setDate(latePlusBuffer.getDate() + 30);
+  const maxDate = new Date(Math.min(latePlusBuffer.getTime(), Date.now()));
 
   const candidates = await prisma.bilag.findMany({
     where: { receivedAt: { gte: minDate, lte: maxDate } },

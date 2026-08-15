@@ -528,19 +528,21 @@ export default function BilagAfstemningPage() {
             </section>
           )}
 
-          <section className="bg-slate-900 text-white rounded-lg p-6 sticky bottom-4 shadow-lg">
-            <h2 className="text-lg font-semibold mb-1">3. Bekræft afstemningen</h2>
-            <p className="text-sm text-slate-300 mb-4">
-              {bestMatchBilagIds.length} bilag markeres som <strong>Afstemt</strong> (endelige), og{" "}
-              {ignoreSelection.size} bilag arkiveres som <strong>Ignoreret</strong>. Intet slettes.
-              {rejectedCount > 0 &&
-                ` De ${rejectedCount} du svarede "nej" til rører vi ikke — de bliver liggende som de er.`}
-            </p>
-            {confirmError && <p className="text-sm text-red-300 mb-3">{confirmError}</p>}
+          <section className="bg-white border-2 border-slate-900 rounded-lg p-5 flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <h2 className="text-base font-semibold text-slate-900">3. Bekræft afstemningen</h2>
+              <p className="text-sm text-slate-500 mt-0.5">
+                {bestMatchBilagIds.length} bilag → <strong className="text-slate-700">Afstemt</strong>,{" "}
+                {ignoreSelection.size} bilag → <strong className="text-slate-700">Ignoreret</strong>.
+                Intet slettes.
+                {rejectedCount > 0 && ` De ${rejectedCount} "nej"-svar rører vi ikke.`}
+              </p>
+              {confirmError && <p className="text-sm text-red-600 mt-1">{confirmError}</p>}
+            </div>
             <button
               onClick={() => confirmReconciliation(bestMatchBilagIds)}
               disabled={confirming || bestMatchBilagIds.length === 0}
-              className="bg-white text-slate-900 rounded-md px-4 py-2 text-sm font-semibold disabled:opacity-50"
+              className="bg-slate-900 text-white rounded-md px-4 py-2 text-sm font-semibold disabled:opacity-50 whitespace-nowrap"
             >
               {confirming ? "Bekræfter…" : "✓ Bekræft afstemning"}
             </button>
