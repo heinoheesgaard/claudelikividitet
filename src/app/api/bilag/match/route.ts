@@ -102,39 +102,41 @@ export async function POST(request: NextRequest) {
           : null;
         const dateBonus = invoiceDateDiff !== null && invoiceDateDiff <= 2 ? 5 : 0;
 
-        // The amount is the strongest signal of all — two independent records
-        // (bank statement vs. invoice PDF) agreeing on the exact same amount is
-        // rarely a coincidence, even when the vendor text doesn't overlap at all.
-        // Only trust it when the guessed amount is in DKK — the bank statement
-        // amount always is, so a EUR/USD invoice total isn't comparable without
-        // a currency conversion we don't do.
+        // The bank amount and the invoice/receipt total record the exact same
+        // payment, so they should agree to the øre — a 1 kr gap isn't
+        // rounding, it's a sign these are probably two different purchases
+        // that happen to cost about the same. Only an exact match (allowing
+        // for float rounding) is trustworthy enough to stand alone; anything
+        // merely "close" still needs another signal to back it up. Only
+        // trust the amount at all when the guessed amount is in DKK — the
+        // bank statement amount always is, so a EUR/USD invoice total isn't
+        // comparable without a currency conversion we don't do.
         const isComparableCurrency = c.guessedCurrency === null || c.guessedCurrency === "DKK";
         const amountDiff =
           c.guessedAmount !== null && isComparableCurrency
             ? Math.abs(c.guessedAmount - Math.abs(row.amount))
             : null;
-        const amountBonus = amountDiff === null ? 0 : amountDiff <= 1 ? 20 : amountDiff <= 5 ? 8 : 0;
+        const exactAmountMatch = amountDiff !== null && amountDiff < 0.01;
+        const amountBonus = amountDiff === null ? 0 : exactAmountMatch ? 20 : amountDiff <= 5 ? 8 : 0;
 
         const haystack = `${c.subject} ${c.senderEmail} ${c.snippet ?? ""} ${c.attachmentNames}`
           .toLowerCase();
         const textMatchCount = words.filter((w) => haystack.includes(w)).length;
         const score = textMatchCount + dateBonus + amountBonus;
 
-        // A raw "any positive score" bar let single, weak signals stand
-        // completely on their own — and a bank statement covering just a
-        // handful of days means *every* bilag received around then falls
-        // within the ±2-day dateBonus window, so "invoice date happens to be
-        // close" alone was matching the same bilag against every posting in
-        // the file regardless of amount or vendor. Require each signal type
-        // to actually corroborate another one, except an exact amount match,
-        // which is reliable enough (two independent records landing on the
-        // same kr-and-øre total) to stand alone.
-        const strongAmountMatch = amountDiff !== null && amountDiff <= 1;
+        // A bank statement covering just a handful of days means both "date
+        // happens to be close" AND "amount happens to be within a few kroner"
+        // are individually common by pure coincidence — even combined, they
+        // matched a receipt with a completely unrelated vendor to a posting
+        // 1 kr away from its total. Real vendor-name overlap is the one
+        // signal that isn't nearly-guaranteed by the statement's own date
+        // range, so — short of an exact-to-the-øre amount match, reliable
+        // enough to stand alone — every accepted match now needs at least
+        // one real shared word, not just date and/or a loose amount.
         const accept =
-          strongAmountMatch ||
-          (amountBonus > 0 && (dateBonus > 0 || textMatchCount > 0)) ||
-          textMatchCount >= 2 ||
-          (dateBonus > 0 && textMatchCount >= 1);
+          exactAmountMatch ||
+          (textMatchCount >= 1 && (amountBonus > 0 || dateBonus > 0)) ||
+          textMatchCount >= 2;
         if (!accept) return null;
         return { bilag: c, score, daysSincePurchase, hasAttachment: c.attachments.length > 0 };
       })
