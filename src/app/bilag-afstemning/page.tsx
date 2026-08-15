@@ -263,6 +263,7 @@ export default function BilagAfstemningPage() {
   const confirmedRows = found.filter((r) => rowDecisions[r.bilagNumber] !== false);
   const rejectedCount = found.length - confirmedRows.length;
   const bestMatchBilagIds = [...new Set(confirmedRows.map((r) => r.matches[0].bilagId))];
+  const sortedResults = [...(results ?? [])].sort((a, b) => a.date.localeCompare(b.date));
 
   const phase: Phase = confirmedSummary ? "done" : results ? "review" : "upload";
 
@@ -322,151 +323,150 @@ export default function BilagAfstemningPage() {
             unmatchedCount={unmatchedBilag?.length ?? 0}
           />
 
-          {notFound.length > 0 && (
-            <section className="bg-amber-50 border-2 border-amber-300 rounded-lg p-6">
-              <h2 className="text-lg font-bold text-amber-900 mb-1">
-                ❌ Disse mangler stadig et bilag ({notFound.length})
-              </h2>
-              <p className="text-sm text-amber-800 mb-4">
-                Bed om kvitteringen igen, eller tjek om den er sendt til en anden adresse end
-                revisorkurt@thypisk.dk.
-              </p>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="text-left text-amber-900 border-b-2 border-amber-300">
-                      <th className="py-2 pr-4">Dato</th>
-                      <th className="py-2 pr-4">Tekst</th>
-                      <th className="py-2 pr-4">Beløb</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {notFound.map((r) => (
-                      <tr key={r.bilagNumber} className="border-b border-amber-200 text-amber-900">
-                        <td className="py-2 pr-4 whitespace-nowrap">{formatDate(r.date)}</td>
-                        <td className="py-2 pr-4">{r.text}</td>
-                        <td className="py-2 pr-4 whitespace-nowrap font-medium">
-                          {formatDKK(r.amount)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+          <section className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+            <div className="flex flex-wrap items-center justify-between gap-3 p-4 border-b border-slate-200">
+              <div>
+                <h2 className="text-base font-semibold text-slate-900">
+                  Gennemgå posteringer ({sortedResults.length})
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Sorteret efter dato · venstre er banken, højre er bilaget Julia fandt (hvis nogen).
+                  {rejectedCount > 0 && (
+                    <span className="text-red-600"> · {rejectedCount} markeret forkert.</span>
+                  )}
+                </p>
               </div>
-            </section>
-          )}
-
-          <section>
-            <div className="flex flex-wrap items-center justify-between gap-3 mb-1">
-              <h2 className="text-lg font-semibold text-slate-900">
-                ✅ Disse er fundet ({found.length})
-                {rejectedCount > 0 && (
-                  <span className="ml-2 text-sm font-normal text-red-600">
-                    · {rejectedCount} markeret forkert
-                  </span>
-                )}
-              </h2>
               <button
                 onClick={() => downloadZip(bestMatchBilagIds)}
                 disabled={zipping || bestMatchBilagIds.length === 0}
-                className="bg-slate-900 text-white rounded-md px-3 py-1.5 text-sm font-medium disabled:opacity-50"
+                className="bg-slate-900 text-white rounded-md px-3 py-1.5 text-sm font-medium disabled:opacity-50 whitespace-nowrap"
               >
-                {zipping ? "Pakker…" : `📦 Download bekræftede som ZIP (${bestMatchBilagIds.length})`}
+                {zipping ? "Pakker…" : `📦 ZIP (${bestMatchBilagIds.length})`}
               </button>
             </div>
-            {zipError && <p className="text-sm text-red-600 mt-2">{zipError}</p>}
-            <p className="text-sm text-slate-500 mt-1 mb-4">
-              For hvert par: er bankposteringen og bilaget den samme udgift? Svar ja eller nej.
-            </p>
-            <div className="flex flex-col gap-4">
-              {found.map((r) => {
-                const m = r.matches[0];
-                const isDKK = m.guessedCurrency === null || m.guessedCurrency === "DKK";
-                const amountMatches =
-                  m.guessedAmount != null && isDKK && Math.abs(m.guessedAmount - Math.abs(r.amount)) <= 1;
-                const decision = rowDecisions[r.bilagNumber] !== false;
-
-                return (
-                  <div
-                    key={r.bilagNumber}
-                    className={`border-2 rounded-lg p-4 ${
-                      decision ? "border-slate-200 bg-white" : "border-red-300 bg-red-50"
-                    }`}
-                  >
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      <div className="bg-slate-50 rounded-md p-4">
-                        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
-                          🏦 Bankpostering
-                        </p>
-                        <p className="text-slate-900 font-medium">{r.text}</p>
-                        <p className="text-slate-500 text-sm mt-1">{formatDate(r.date)}</p>
-                        <p className="text-2xl font-bold text-slate-900 mt-2">
-                          {formatDKK(r.amount)}
-                        </p>
-                      </div>
-                      <div className="bg-slate-50 rounded-md p-4">
-                        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
-                          📎 Bilag fundet
-                        </p>
-                        <p className="text-slate-900 font-medium">{m.subject}</p>
-                        <p className="text-slate-500 text-sm mt-1">fra {m.senderEmail}</p>
-                        {m.guessedAmount != null && (
-                          <p
-                            className={`text-2xl font-bold mt-2 ${
-                              amountMatches ? "text-emerald-700" : "text-slate-900"
-                            }`}
+            {zipError && <p className="text-sm text-red-600 px-4 pt-3">{zipError}</p>}
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50 text-xs text-slate-500 uppercase tracking-wide">
+                  <tr className="text-left border-b border-slate-200">
+                    <th className="py-2 pl-4 pr-3">Dato</th>
+                    <th className="py-2 pr-3">Bankpostering</th>
+                    <th className="py-2 pr-3 text-right">Beløb</th>
+                    <th className="py-2 pr-3 border-l border-slate-200 pl-3">Bilag</th>
+                    <th className="py-2 pr-3 text-right">Bilagsbeløb</th>
+                    <th className="py-2 pr-3">Fil</th>
+                    <th className="py-2 pr-4 text-center">OK?</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedResults.map((r) => {
+                    const m = r.matches[0];
+                    if (!m) {
+                      return (
+                        <tr key={r.bilagNumber} className="border-b border-slate-100 bg-amber-50/50">
+                          <td className="py-2 pl-4 pr-3 whitespace-nowrap text-slate-500">
+                            {formatDate(r.date)}
+                          </td>
+                          <td className="py-2 pr-3 text-slate-900">{r.text}</td>
+                          <td className="py-2 pr-3 text-right whitespace-nowrap font-medium text-slate-900">
+                            {formatDKK(r.amount)}
+                          </td>
+                          <td
+                            colSpan={4}
+                            className="py-2 pr-4 pl-3 border-l border-slate-200 text-amber-700 text-xs font-medium"
                           >
-                            {formatDKK(m.guessedAmount)}
-                            {!isDKK && ` ${m.guessedCurrency}`}
-                            {amountMatches && " ✓"}
-                          </p>
-                        )}
-                        {m.attachments.length > 0 ? (
-                          <div className="flex flex-col gap-0.5 mt-2">
-                            {m.attachments.map((a) => (
-                              <a
-                                key={a.id}
-                                href={`/api/bilag/attachments/${a.id}`}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="text-blue-600 hover:underline text-sm"
-                              >
-                                📎 {a.filename}
-                              </a>
-                            ))}
-                          </div>
-                        ) : (
-                          <p className="text-amber-700 text-sm mt-2">ingen vedhæftet fil</p>
-                        )}
-                      </div>
-                    </div>
+                            ❌ Mangler bilag
+                          </td>
+                        </tr>
+                      );
+                    }
+                    const isDKK = m.guessedCurrency === null || m.guessedCurrency === "DKK";
+                    const amountMatches =
+                      m.guessedAmount != null &&
+                      isDKK &&
+                      Math.abs(m.guessedAmount - Math.abs(r.amount)) <= 1;
+                    const decision = rowDecisions[r.bilagNumber] !== false;
 
-                    <div className="flex items-center justify-center gap-3 mt-4">
-                      <span className="text-sm text-slate-500 mr-1">Er det den samme udgift?</span>
-                      <button
-                        onClick={() => setRowDecision(r.bilagNumber, true)}
-                        className={`px-4 py-1.5 rounded-md text-sm font-semibold border-2 ${
-                          decision
-                            ? "bg-emerald-600 text-white border-emerald-600"
-                            : "bg-white text-emerald-700 border-emerald-300"
-                        }`}
+                    return (
+                      <tr
+                        key={r.bilagNumber}
+                        className={`border-b border-slate-100 ${decision ? "" : "bg-red-50"}`}
                       >
-                        ✅ Ja
-                      </button>
-                      <button
-                        onClick={() => setRowDecision(r.bilagNumber, false)}
-                        className={`px-4 py-1.5 rounded-md text-sm font-semibold border-2 ${
-                          !decision
-                            ? "bg-red-600 text-white border-red-600"
-                            : "bg-white text-red-700 border-red-300"
-                        }`}
-                      >
-                        ❌ Nej
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
+                        <td className="py-2 pl-4 pr-3 whitespace-nowrap text-slate-500">
+                          {formatDate(r.date)}
+                        </td>
+                        <td className="py-2 pr-3 text-slate-900">{r.text}</td>
+                        <td className="py-2 pr-3 text-right whitespace-nowrap font-medium text-slate-900">
+                          {formatDKK(r.amount)}
+                        </td>
+                        <td className="py-2 pr-3 pl-3 border-l border-slate-200 text-slate-900">
+                          {m.subject}
+                        </td>
+                        <td
+                          className={`py-2 pr-3 text-right whitespace-nowrap font-medium ${
+                            amountMatches ? "text-emerald-700" : "text-slate-900"
+                          }`}
+                        >
+                          {m.guessedAmount != null ? (
+                            <>
+                              {formatDKK(m.guessedAmount)}
+                              {!isDKK && ` ${m.guessedCurrency}`}
+                              {amountMatches && " ✓"}
+                            </>
+                          ) : (
+                            "–"
+                          )}
+                        </td>
+                        <td className="py-2 pr-3">
+                          {m.attachments.length > 0 ? (
+                            <div className="flex flex-col gap-0.5">
+                              {m.attachments.map((a) => (
+                                <a
+                                  key={a.id}
+                                  href={`/api/bilag/attachments/${a.id}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-blue-600 hover:underline whitespace-nowrap"
+                                >
+                                  📎 {a.filename}
+                                </a>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-amber-700 text-xs">ingen fil</span>
+                          )}
+                        </td>
+                        <td className="py-2 pr-4">
+                          <div className="flex items-center justify-center gap-1">
+                            <button
+                              onClick={() => setRowDecision(r.bilagNumber, true)}
+                              title="Ja, samme udgift"
+                              className={`w-7 h-7 rounded-md text-sm border ${
+                                decision
+                                  ? "bg-emerald-600 text-white border-emerald-600"
+                                  : "bg-white text-emerald-700 border-emerald-300"
+                              }`}
+                            >
+                              ✓
+                            </button>
+                            <button
+                              onClick={() => setRowDecision(r.bilagNumber, false)}
+                              title="Nej, forkert match"
+                              className={`w-7 h-7 rounded-md text-sm border ${
+                                !decision
+                                  ? "bg-red-600 text-white border-red-600"
+                                  : "bg-white text-red-700 border-red-300"
+                              }`}
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           </section>
 
