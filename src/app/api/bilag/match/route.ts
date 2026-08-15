@@ -133,10 +133,21 @@ export async function POST(request: NextRequest) {
         // range, so — short of an exact-to-the-øre amount match, reliable
         // enough to stand alone — every accepted match now needs at least
         // one real shared word, not just date and/or a loose amount.
+        //
+        // But text overlap on its own is weak — a couple of generic words
+        // (a payment method, a city, a common surname) can coincidentally
+        // appear in an unrelated bilag's subject/snippet. When we DO have a
+        // guessed amount to compare against and it's off by more than a
+        // rounding-sized gap, that is hard evidence this is a different
+        // purchase, no matter how much text lines up — a -11.153,51 kr
+        // posting is never the same transaction as a 125,00 kr invoice. Only
+        // skip this veto when we have no amount to compare at all.
+        const amountKnownButWrong = amountDiff !== null && amountDiff > 5;
         const accept =
-          exactAmountMatch ||
-          (textMatchCount >= 1 && (amountBonus > 0 || dateBonus > 0)) ||
-          textMatchCount >= 2;
+          !amountKnownButWrong &&
+          (exactAmountMatch ||
+            (textMatchCount >= 1 && (amountBonus > 0 || dateBonus > 0)) ||
+            textMatchCount >= 2);
         if (!accept) return null;
         return { bilag: c, score, daysSincePurchase, hasAttachment: c.attachments.length > 0 };
       })
