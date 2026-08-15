@@ -517,13 +517,33 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
 
 const IMAGE_EXTENSIONS = /\.(jpe?g|png|webp|gif|bmp|tiff?)$/i;
 
+// Order confirmation emails from webshops routinely carry generic PDF
+// attachments alongside (or instead of) the actual receipt — terms and
+// conditions, a return-policy form — that happen to be PDFs but contain no
+// invoice amount at all. Picking whichever PDF comes first would grab one
+// of these and confidently guess a nonsense number out of it (e.g. a clause
+// reference read as a price) while the real order total sits in the email
+// body, unread. Filtered out by filename before any PDF/image is chosen, so
+// callers naturally fall through to the next attachment or the body text.
+const NON_INVOICE_FILENAME_RE =
+  /(handels|forretnings|salgs|leverings)?betingelser|vilk[aå]r|retur.?(formular|politik|seddel)|fortrydelses(ret|formular)|persondata|privatlivspolitik|cookie|gdpr|terms.?(and|&)?.?conditions|return.?(form|policy)|privacy.?policy/i;
+
+function isLikelyNotInvoiceAttachment(filename: string): boolean {
+  return NON_INVOICE_FILENAME_RE.test(filename);
+}
+
+function filterInvoiceCandidates<T extends { filename: string }>(attachments: T[]): T[] {
+  return attachments.filter((a) => !isLikelyNotInvoiceAttachment(a.filename));
+}
+
 // Diagnostic helper: returns the raw text Julia extracts before any
 // amount/vendor/date guessing runs on it, so a specific invoice's layout can
 // be inspected directly instead of guessing blind from a screenshot.
 export async function extractRawText(
-  attachments: { filename: string; contentType: string; data: Uint8Array<ArrayBuffer> }[],
+  rawAttachments: { filename: string; contentType: string; data: Uint8Array<ArrayBuffer> }[],
   bodyText?: string | null,
 ): Promise<{ source: "pdf" | "image" | "email-body" | "none"; filename: string | null; text: string }> {
+  const attachments = filterInvoiceCandidates(rawAttachments);
   const pdf = attachments.find(
     (a) => a.contentType === "application/pdf" || a.filename.toLowerCase().endsWith(".pdf"),
   );
@@ -557,9 +577,10 @@ export async function extractRawText(
 }
 
 export async function guessInvoiceDetails(
-  attachments: { filename: string; contentType: string; data: Uint8Array<ArrayBuffer> }[],
+  rawAttachments: { filename: string; contentType: string; data: Uint8Array<ArrayBuffer> }[],
   bodyText?: string | null,
 ): Promise<GuessedDetails> {
+  const attachments = filterInvoiceCandidates(rawAttachments);
   const pdf = attachments.find(
     (a) => a.contentType === "application/pdf" || a.filename.toLowerCase().endsWith(".pdf"),
   );

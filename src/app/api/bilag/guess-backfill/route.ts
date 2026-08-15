@@ -74,13 +74,18 @@ export async function POST(request: NextRequest) {
           data: new Uint8Array(a.data) as Uint8Array<ArrayBuffer>,
         }));
 
-        // Bilag stored before body-text capture existed (no attachment, no
-        // bodyText) have nothing to guess from and never will unless we go
-        // fetch it — re-run "Gæt beløb nu" alone can't help them. Pull the
-        // body text from Gmail directly by the message's own Message-Id so
-        // these get fixed without anyone having to resend the email.
+        // Bilag stored before body-text capture existed have no bodyText to
+        // fall back on and never will unless we go fetch it — re-run "Gæt
+        // beløb nu" alone can't help them. This isn't limited to bilag with
+        // no attachment at all: a forwarded order confirmation routinely
+        // carries irrelevant PDFs (terms and conditions, a return form)
+        // alongside the real total, which only exists in the email body —
+        // guessInvoiceDetails now filters those out by filename, but there's
+        // still nothing to fall back to without the body text saved. Pull it
+        // from Gmail directly by the message's own Message-Id so these get
+        // fixed without anyone having to resend the email.
         let bodyText = bilag.bodyText;
-        if (attachments.length === 0 && bodyText === null) {
+        if (bodyText === null) {
           try {
             bodyText = await withTimeout(
               refetchBodyTextByMessageId(bilag.emailMessageId),
