@@ -19,6 +19,7 @@ enum BilagStatus {
   MANGLER_BELOEB
   BOGFOERT
   IGNORERET
+  AFSTEMT
 }
 
 model BusinessArea {

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { formatDKK, formatDate } from "@/lib/format";
+import { parseRawBankCsvText, parseRawBankXlsxRows } from "@/lib/bank-export-parser";
 
 type MatchAttachment = {
   id: string;
@@ -36,59 +37,100 @@ type ParsedRow = {
   amount: number;
 };
 
+type UnmatchedBilag = {
+  bilagId: string;
+  subject: string;
+  senderEmail: string;
+  receivedAt: string;
+  guessedInvoiceDate: string | null;
+  guessedAmount: number | null;
+  guessedCurrency: string | null;
+  attachments: MatchAttachment[];
+};
+
 export default function BilagAfstemningPage() {
   const [fileName, setFileName] = useState<string | null>(null);
   const [parseError, setParseError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<MatchResult[] | null>(null);
+  const [unmatchedBilag, setUnmatchedBilag] = useState<UnmatchedBilag[] | null>(null);
+  const [ignoreSelection, setIgnoreSelection] = useState<Set<string>>(new Set());
+  const [confirming, setConfirming] = useState(false);
+  const [confirmError, setConfirmError] = useState<string | null>(null);
+  const [confirmedSummary, setConfirmedSummary] = useState<{
+    afstemt: number;
+    ignoreret: number;
+  } | null>(null);
 
   async function handleFile(file: File) {
     setParseError(null);
     setResults(null);
+    setUnmatchedBilag(null);
+    setIgnoreSelection(new Set());
+    setConfirmError(null);
+    setConfirmedSummary(null);
     setFileName(file.name);
     setLoading(true);
     try {
-      const XLSX = await import("xlsx");
-      const buffer = await file.arrayBuffer();
-      const workbook = XLSX.read(buffer, { type: "array", cellDates: true });
-      const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      const raw: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, blankrows: false });
+      let rows: ParsedRow[];
 
-      const headerIdx = raw.findIndex(
-        (r) => Array.isArray(r) && r.some((c) => String(c).trim() === "Bilag"),
-      );
-      if (headerIdx === -1) {
-        setParseError(
-          "Kunne ikke finde en kolonne der hedder 'Bilag' i filen. Er det en e-conomic kontoudskrift?",
+      if (file.name.toLowerCase().endsWith(".csv")) {
+        // Raw bank export: no header, semicolon-delimited (Dato;Tekst;Beløb;Valuta[;info]).
+        const text = await file.text();
+        rows = parseRawBankCsvText(text);
+        if (rows.length === 0) {
+          setParseError(
+            "Kunne ikke læse posteringer fra CSV-filen. Forventet format: dato;tekst;beløb;valuta pr. linje, semikolon-adskilt, ingen overskriftsrække.",
+          );
+          setLoading(false);
+          return;
+        }
+      } else {
+        const XLSX = await import("xlsx");
+        const buffer = await file.arrayBuffer();
+        const workbook = XLSX.read(buffer, { type: "array", cellDates: true });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const raw: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, blankrows: false });
+
+        const headerIdx = raw.findIndex(
+          (r) => Array.isArray(r) && r.some((c) => String(c).trim() === "Bilag"),
         );
-        setLoading(false);
-        return;
-      }
-      const header = raw[headerIdx].map((c) => String(c).trim());
-      const bilagCol = header.indexOf("Bilag");
-      const dateCol = header.indexOf("Dato");
-      const textCol = header.indexOf("Tekst");
-      const amountCol = header.indexOf("Beløb (DKK)");
 
-      const rows: ParsedRow[] = [];
-      for (let i = headerIdx + 1; i < raw.length; i++) {
-        const r = raw[i];
-        if (!Array.isArray(r) || r[bilagCol] == null || r[bilagCol] === "") continue;
-        const rawDate = r[dateCol];
-        const date = rawDate instanceof Date ? rawDate : new Date(String(rawDate));
-        if (Number.isNaN(date.getTime())) continue;
-        rows.push({
-          bilagNumber: String(r[bilagCol]),
-          date: date.toISOString().slice(0, 10),
-          text: String(r[textCol] ?? ""),
-          amount: Number(r[amountCol] ?? 0),
-        });
-      }
+        if (headerIdx !== -1) {
+          // e-conomic kontoudskrift — has a real "Bilag" column.
+          const header = raw[headerIdx].map((c) => String(c).trim());
+          const bilagCol = header.indexOf("Bilag");
+          const dateCol = header.indexOf("Dato");
+          const textCol = header.indexOf("Tekst");
+          const amountCol = header.indexOf("Beløb (DKK)");
 
-      if (rows.length === 0) {
-        setParseError("Fandt ingen rækker med et bilagsnummer i filen.");
-        setLoading(false);
-        return;
+          rows = [];
+          for (let i = headerIdx + 1; i < raw.length; i++) {
+            const r = raw[i];
+            if (!Array.isArray(r) || r[bilagCol] == null || r[bilagCol] === "") continue;
+            const rawDate = r[dateCol];
+            const date = rawDate instanceof Date ? rawDate : new Date(String(rawDate));
+            if (Number.isNaN(date.getTime())) continue;
+            rows.push({
+              bilagNumber: String(r[bilagCol]),
+              date: date.toISOString().slice(0, 10),
+              text: String(r[textCol] ?? ""),
+              amount: Number(r[amountCol] ?? 0),
+            });
+          }
+        } else {
+          // No "Bilag" column — try the raw bank export layout instead
+          // (Dato | Tekst | Beløb | Valuta, no header row at all).
+          rows = parseRawBankXlsxRows(raw);
+        }
+
+        if (rows.length === 0) {
+          setParseError(
+            "Kunne ikke genkende filens format — hverken en e-conomic kontoudskrift (med en 'Bilag'-kolonne) eller et rå bankudtræk (dato, tekst og beløb i de tre første kolonner).",
+          );
+          setLoading(false);
+          return;
+        }
       }
 
       const res = await fetch("/api/bilag/match", {
@@ -104,6 +146,13 @@ export default function BilagAfstemningPage() {
       }
       const body = await res.json();
       setResults(body.results);
+      const unmatched: UnmatchedBilag[] = body.unmatchedBilag ?? [];
+      setUnmatchedBilag(unmatched);
+      // Pre-select all of them for archiving — the point of this list is
+      // "these didn't match anything in the period", so defaulting to
+      // "ignore all of them" matches the stated workflow. Anything worth
+      // keeping around a bit longer can just be unchecked before confirming.
+      setIgnoreSelection(new Set(unmatched.map((b) => b.bilagId)));
     } catch (err) {
       setParseError(err instanceof Error ? err.message : "Kunne ikke læse filen.");
     }
@@ -141,6 +190,43 @@ export default function BilagAfstemningPage() {
     setZipping(false);
   }
 
+  function toggleIgnore(bilagId: string) {
+    setIgnoreSelection((prev) => {
+      const next = new Set(prev);
+      if (next.has(bilagId)) {
+        next.delete(bilagId);
+      } else {
+        next.add(bilagId);
+      }
+      return next;
+    });
+  }
+
+  async function confirmReconciliation(matchedBilagIds: string[]) {
+    setConfirming(true);
+    setConfirmError(null);
+    try {
+      const res = await fetch("/api/bilag/reconcile-confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          matchedBilagIds,
+          ignoredBilagIds: [...ignoreSelection],
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setConfirmError(body.error ?? "Kunne ikke bekræfte afstemningen.");
+        return;
+      }
+      const body = await res.json();
+      setConfirmedSummary({ afstemt: body.afstemt, ignoreret: body.ignoreret });
+    } catch {
+      setConfirmError("Der skete en fejl under bekræftelse.");
+    }
+    setConfirming(false);
+  }
+
   const notFound = results?.filter((r) => r.matches.length === 0) ?? [];
   const found = results?.filter((r) => r.matches.length > 0) ?? [];
   const bestMatchBilagIds = [...new Set(found.map((r) => r.matches[0].bilagId))];
@@ -150,16 +236,16 @@ export default function BilagAfstemningPage() {
       <div>
         <h1 className="text-2xl font-semibold text-slate-900">Bilagsafstemning</h1>
         <p className="text-slate-500 mt-1">
-          Upload en kontoudskrift fra e-conomic (posteringer på bilagskontoen, f.eks. konto 9900),
-          og Julia tjekker automatisk hvilke af dem der allerede ligger i Bilag-indbakken — så du
-          slipper for at lede manuelt.
+          Upload jeres bankposteringer (rå CSV/Excel-udtræk fra banken, eller en kontoudskrift fra
+          e-conomic), og Julia tjekker automatisk hvilke af dem der allerede ligger i
+          Bilag-indbakken — så du slipper for at lede manuelt.
         </p>
       </div>
 
       <section className="bg-white border border-slate-200 rounded-lg p-6">
         <input
           type="file"
-          accept=".xlsx,.xls"
+          accept=".xlsx,.xls,.csv"
           onChange={(e) => {
             const file = e.target.files?.[0];
             if (file) handleFile(file);
@@ -283,6 +369,75 @@ export default function BilagAfstemningPage() {
                 </div>
               ))}
             </div>
+          </section>
+
+          {unmatchedBilag && unmatchedBilag.length > 0 && (
+            <section className="bg-white border border-slate-200 rounded-lg p-6">
+              <h2 className="text-lg font-semibold text-slate-900 mb-1">
+                🗄️ Bilag i perioden der ikke matchede nogen postering ({unmatchedBilag.length})
+              </h2>
+              <p className="text-sm text-slate-500 mb-4">
+                Disse ligger i Bilag-indbakken med en dato inden for perioden, men blev ikke
+                matchet til nogen af posteringerne — fejlsendte kvitteringer, dubletter eller
+                lignende. Markerede bliver arkiveret som &quot;Ignoreret&quot; (aldrig slettet) når
+                du bekræfter forneden. Fjern flueben på dem du hellere vil beholde til senere.
+              </p>
+              <div className="flex flex-col gap-2">
+                {unmatchedBilag.map((b) => (
+                  <label
+                    key={b.bilagId}
+                    className="flex items-start gap-3 border border-slate-200 rounded-md p-3 text-sm"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={ignoreSelection.has(b.bilagId)}
+                      onChange={() => toggleIgnore(b.bilagId)}
+                      className="mt-1"
+                    />
+                    <div>
+                      <span className="font-medium text-slate-900">{b.subject}</span>
+                      <span className="text-slate-500"> fra {b.senderEmail}</span>
+                      <span className="text-slate-500"> · modtaget {formatDate(b.receivedAt)}</span>
+                      {b.guessedAmount != null && (
+                        <span className="text-slate-500">
+                          {" "}
+                          · gættet beløb {formatDKK(b.guessedAmount)}
+                          {b.guessedCurrency && b.guessedCurrency !== "DKK"
+                            ? ` ${b.guessedCurrency}`
+                            : ""}
+                        </span>
+                      )}
+                    </div>
+                  </label>
+                ))}
+              </div>
+            </section>
+          )}
+
+          <section className="bg-white border border-slate-200 rounded-lg p-6">
+            {confirmedSummary ? (
+              <p className="text-sm text-emerald-700 font-medium">
+                ✓ Afstemning gemt: {confirmedSummary.afstemt} bilag markeret som afstemt,{" "}
+                {confirmedSummary.ignoreret} arkiveret som ignoreret.
+              </p>
+            ) : (
+              <>
+                <h2 className="text-lg font-semibold text-slate-900 mb-1">Bekræft afstemning</h2>
+                <p className="text-sm text-slate-500 mb-4">
+                  De {bestMatchBilagIds.length} matchede bilag ovenfor markeres som &quot;Afstemt&quot;
+                  (endelige), og de {ignoreSelection.size} markerede bilag herover arkiveres som
+                  &quot;Ignoreret&quot;. Intet bliver slettet.
+                </p>
+                {confirmError && <p className="text-sm text-red-600 mb-3">{confirmError}</p>}
+                <button
+                  onClick={() => confirmReconciliation(bestMatchBilagIds)}
+                  disabled={confirming || bestMatchBilagIds.length === 0}
+                  className="bg-slate-900 text-white rounded-md px-4 py-2 text-sm font-medium disabled:opacity-50"
+                >
+                  {confirming ? "Bekræfter…" : "Bekræft afstemning"}
+                </button>
+              </>
+            )}
           </section>
         </>
       )}

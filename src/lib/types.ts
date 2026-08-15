@@ -28,7 +28,7 @@ export type Transaction = {
   createdAt: string;
 };
 
-export type BilagStatus = "MANGLER_BELOEB" | "BOGFOERT" | "IGNORERET";
+export type BilagStatus = "MANGLER_BELOEB" | "BOGFOERT" | "IGNORERET" | "AFSTEMT";
 
 export type BilagAttachment = {
   id: string;

@@ -132,5 +132,25 @@ export async function POST(request: NextRequest) {
     };
   });
 
-  return NextResponse.json({ results });
+  // Bilag inside the statement's own date range that never came up as a
+  // match for any row — leftover submissions (test mails, wrong forwards,
+  // duplicates) that never went through the bank on this account. Only
+  // offered up from MANGLER_BELOEB: a bilag someone already booked
+  // (BOGFOERT) or previously reconciled/ignored has its own deliberate
+  // status that this step shouldn't silently overwrite.
+  const matchedIds = new Set(results.flatMap((r) => r.matches.map((m) => m.bilagId)));
+  const unmatchedBilag = candidates
+    .filter((c) => c.status === "MANGLER_BELOEB" && !matchedIds.has(c.id))
+    .map((c) => ({
+      bilagId: c.id,
+      subject: c.subject,
+      senderEmail: c.senderEmail,
+      receivedAt: c.receivedAt,
+      guessedInvoiceDate: c.guessedInvoiceDate,
+      guessedAmount: c.guessedAmount,
+      guessedCurrency: c.guessedCurrency,
+      attachments: c.attachments,
+    }));
+
+  return NextResponse.json({ results, unmatchedBilag });
 }
