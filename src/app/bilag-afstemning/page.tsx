@@ -841,9 +841,19 @@ function ManualMatchModal({
   onClose: () => void;
   onSelect: (candidate: MatchCandidate) => void;
 }) {
-  const [dateFrom, setDateFrom] = useState(addDays(row.date, -7));
-  const [dateTo, setDateTo] = useState(addDays(row.date, 7));
-  const [amount, setAmount] = useState(Math.abs(row.amount).toFixed(2));
+  // The auto-matcher already covers close date+amount matches within a
+  // tight window around the statement period — so a manual search using the
+  // same two signals over roughly the same window rarely turns up anything
+  // it didn't. What it can't do is search by vendor name, or reach outside
+  // its own narrow date bounds, so that's what manual search defaults to:
+  // the bank's own posting text as a free-text query, no amount filter
+  // (a misread OCR amount would just filter out the real match), and a
+  // date range wide enough to actually be a different window, not the same
+  // one a second time.
+  const [query, setQuery] = useState(row.text);
+  const [dateFrom, setDateFrom] = useState(addDays(row.date, -45));
+  const [dateTo, setDateTo] = useState(addDays(row.date, 45));
+  const [amount, setAmount] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<Bilag[] | null>(null);
@@ -854,6 +864,7 @@ function ManualMatchModal({
     setResults(null);
     try {
       const params = new URLSearchParams();
+      if (query) params.set("q", query);
       if (dateFrom) params.set("dateFrom", dateFrom);
       if (dateTo) params.set("dateTo", dateTo);
       if (amount) params.set("amount", amount);
@@ -905,6 +916,16 @@ function ManualMatchModal({
         </div>
 
         <div className="flex flex-wrap items-end gap-3 mb-4">
+          <label className="flex flex-col gap-1 text-xs flex-1 min-w-[200px]">
+            <span className="text-slate-500">Firmanavn / tekst</span>
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="fx firmanavn eller del af posteringsteksten"
+              className="border border-slate-300 rounded-md px-2 py-1.5 text-sm text-slate-900"
+            />
+          </label>
           <label className="flex flex-col gap-1 text-xs">
             <span className="text-slate-500">Fra dato</span>
             <input
@@ -930,7 +951,8 @@ function ManualMatchModal({
               step="0.01"
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
-              className="border border-slate-300 rounded-md px-2 py-1.5 text-sm w-32 text-slate-900"
+              placeholder="valgfri"
+              className="border border-slate-300 rounded-md px-2 py-1.5 text-sm w-28 text-slate-900"
             />
           </label>
           <button

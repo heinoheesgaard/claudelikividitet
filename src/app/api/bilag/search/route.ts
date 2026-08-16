@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma/client";
+import { significantWords } from "@/lib/bilag-text";
 
 // Deliberately searches across every status, not just the active queue —
 // the whole point is finding a specific bilag from years back regardless of
@@ -10,10 +11,11 @@ export async function GET(request: NextRequest) {
   const dateFrom = searchParams.get("dateFrom");
   const dateTo = searchParams.get("dateTo");
   const amountParam = searchParams.get("amount");
+  const q = searchParams.get("q");
 
-  if (!dateFrom && !dateTo && !amountParam) {
+  if (!dateFrom && !dateTo && !amountParam && !q) {
     return NextResponse.json(
-      { error: "Angiv mindst en dato eller et beløb at søge på." },
+      { error: "Angiv mindst en dato, et beløb eller en søgetekst." },
       { status: 400 },
     );
   }
@@ -45,10 +47,35 @@ export async function GET(request: NextRequest) {
         ]
       : [];
 
+  // Free-text search (vendor name, invoice number, anything a human would
+  // recognize) is a fundamentally different tool than the date/amount
+  // filters above — it lets you find a bilag Julia's own OCR guessed a
+  // wrong amount or date for, or one submitted well outside a statement's
+  // usual date window, neither of which the amount/date filters can reach.
+  // Any one matching word is enough (OR), same spirit as the automated
+  // matcher's word-overlap check, but here purely for a human to browse and
+  // judge — no accept/reject heuristic involved.
+  const words = q ? significantWords(q) : [];
+  const textCondition: Prisma.BilagWhereInput[] =
+    words.length > 0
+      ? [
+          {
+            OR: words.flatMap((w) => [
+              { subject: { contains: w, mode: "insensitive" as const } },
+              { senderEmail: { contains: w, mode: "insensitive" as const } },
+              { snippet: { contains: w, mode: "insensitive" as const } },
+              { attachmentNames: { contains: w, mode: "insensitive" as const } },
+              { guessedVendor: { contains: w, mode: "insensitive" as const } },
+            ]),
+          },
+        ]
+      : [];
+
   const where: Prisma.BilagWhereInput = {
     AND: [
       ...(dateConditions.length > 0 ? [{ OR: dateConditions }] : []),
       ...(amountCondition.length > 0 ? amountCondition : []),
+      ...textCondition,
     ],
   };
 

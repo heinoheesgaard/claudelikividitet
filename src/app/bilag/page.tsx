@@ -87,6 +87,7 @@ export default function BilagPage() {
 // archived as ignored.
 function ArchiveSearch() {
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [amount, setAmount] = useState("");
@@ -96,14 +97,15 @@ function ArchiveSearch() {
 
   async function search() {
     setError(null);
-    if (!dateFrom && !dateTo && !amount) {
-      setError("Angiv mindst en dato eller et beløb at søge på.");
+    if (!query && !dateFrom && !dateTo && !amount) {
+      setError("Angiv mindst et firmanavn, en dato eller et beløb at søge på.");
       return;
     }
     setLoading(true);
     setResults(null);
     try {
       const params = new URLSearchParams();
+      if (query) params.set("q", query);
       if (dateFrom) params.set("dateFrom", dateFrom);
       if (dateTo) params.set("dateTo", dateTo);
       if (amount) params.set("amount", amount);
@@ -133,6 +135,16 @@ function ArchiveSearch() {
       {open && (
         <div className="px-5 pb-5 border-t border-slate-100 pt-4 flex flex-col gap-4">
           <div className="flex flex-wrap items-end gap-3">
+            <label className="flex flex-col gap-1 text-xs flex-1 min-w-[200px]">
+              <span className="text-slate-500">Firmanavn / tekst</span>
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="fx firmanavn"
+                className="border border-slate-300 rounded-md px-2 py-1.5 text-sm text-slate-900"
+              />
+            </label>
             <label className="flex flex-col gap-1 text-xs">
               <span className="text-slate-500">Fra dato</span>
               <input

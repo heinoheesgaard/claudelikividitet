@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { significantWords } from "@/lib/bilag-text";
 
 type MatchRow = {
   bilagNumber: string;
@@ -7,38 +8,6 @@ type MatchRow = {
   text: string;
   amount: number;
 };
-
-const STOPWORDS = new Set([
-  "kontaktløs",
-  "nota",
-  "notanr",
-  "til",
-  "fra",
-  "mob",
-  "pay",
-  "mobpay",
-  "aps",
-  "com",
-  // Thypisk's own home town — shows up in nearly every piece of
-  // correspondence they have (their own address, a local vendor's address,
-  // a delivery address), so it does nothing to distinguish one purchase
-  // from another. Both spellings are needed: bank exports transliterate "ø"
-  // as "oe" ("VORUPOER"), while text read off an actual invoice keeps "ø".
-  "thisted",
-  "vorupør",
-  "vorupoer",
-]);
-
-function significantWords(text: string): string[] {
-  // Punctuation (including "." in domains like "gs-supply.dk") is treated as
-  // a word break, so "supply" alone can still match a candidate whose text
-  // only says "GS Supply" without the ".dk" suffix.
-  return text
-    .toLowerCase()
-    .replace(/[^a-zæøå0-9\s]/g, " ")
-    .split(/\s+/)
-    .filter((w) => w.length >= 3 && !/^\d+$/.test(w) && !STOPWORDS.has(w));
-}
 
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null);
