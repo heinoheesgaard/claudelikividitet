@@ -95,6 +95,17 @@ model BilagAttachment {
   @@index([bilagId])
 }
 
+// Caches CVR-number → registered company name lookups against the public
+// cvrapi.dk registry, so the same recurring vendor (the same supermarket,
+// week after week) doesn't trigger a fresh external API call on every OCR
+// pass — and so a vendor with no CVR match doesn't get re-queried forever.
+model CvrLookup {
+  id         String   @id @default(cuid())
+  cvr        String   @unique
+  name       String?
+  lookedUpAt DateTime @default(now())
+}
+
 model LoginAttempt {
   id          String   @id @default(cuid())
   ipAddress   String

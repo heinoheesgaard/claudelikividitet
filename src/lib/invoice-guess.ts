@@ -2,6 +2,7 @@ import "server-only";
 import path from "node:path";
 import { extractText } from "unpdf";
 import type { Worker as TesseractWorker } from "tesseract.js";
+import { prisma } from "@/lib/prisma";
 
 // tesseract.js's Node worker setup does `worker.onerror = handler` to be
 // notified if the spawned worker_thread fails to start (e.g. a missing
@@ -306,6 +307,19 @@ function guessAmountFromText(rawText: string): AmountMatch | null {
   return null;
 }
 
+// A stylised logo/tagline font (a supermarket's cursive slogan, a script
+// wordmark) often OCRs into a line mixing lone digits with lone letters —
+// "vi 3 må A" from "Vi holder af mad" — which reads as nothing a human
+// would recognise as a name. Filtering it out at least stops it from being
+// offered as a confident-looking guess; it can't recover what the real
+// text said, only avoid returning something worse than no guess at all.
+function looksLikeGarbledLine(line: string): boolean {
+  const words = line.split(/\s+/).filter(Boolean);
+  const hasDigitToken = words.some((w) => /\d/.test(w));
+  const singleLetterTokens = words.filter((w) => /^[a-zæøå]$/i.test(w)).length;
+  return hasDigitToken && singleLetterTokens > 0;
+}
+
 function guessVendorFromText(text: string): string | null {
   const lines = text
     .split("\n")
@@ -315,11 +329,73 @@ function guessVendorFromText(text: string): string | null {
   for (const line of lines.slice(0, 8)) {
     const isMostlyDigits = (line.match(/\d/g)?.length ?? 0) > line.length / 2;
     const looksLikeDate = /\d{1,2}[./-]\d{1,2}[./-]\d{2,4}/.test(line);
-    if (!isMostlyDigits && !looksLikeDate) {
+    if (!isMostlyDigits && !looksLikeDate && !looksLikeGarbledLine(line)) {
       return line;
     }
   }
   return null;
+}
+
+// Danish CVR (business registration) numbers are always exactly 8 digits,
+// and — unlike a stylised logo — the "CVR NR." label and its number are
+// almost always printed in the receipt's plain body font, so OCR reads them
+// reliably even when the vendor's own logo is unreadable. Scanned line by
+// line (rather than across the whole text with a multiline-aware regex) so
+// a match can never accidentally swallow digits from an unrelated line
+// (a phone number, a price) that happens to follow on the next line.
+const CVR_LINE_RE = /CVR\.?\s*-?\s*(?:NR|NUMMER)?\.?\s*:?\s*((?:DK)?[\d\s]{6,16})/i;
+
+function extractCvrNumber(text: string): string | null {
+  for (const line of text.split("\n")) {
+    const m = line.match(CVR_LINE_RE);
+    if (!m) continue;
+    const digits = m[1].replace(/\D/g, "");
+    if (digits.length === 8) return digits;
+  }
+  return null;
+}
+
+const CVR_LOOKUP_TIMEOUT_MS = 5_000;
+
+// Looks up the company actually registered under a CVR number via the free
+// cvrapi.dk registry — the one way to recover a real vendor name when the
+// receipt's own logo/tagline OCRs into garbage. Results (including "not
+// found") are cached in the CvrLookup table so the same recurring vendor
+// doesn't trigger a fresh external request on every single receipt; a
+// failed *request* (network error, timeout, rate limit) is deliberately
+// left uncached so it gets retried on the next receipt instead of
+// permanently giving up on a vendor cvrapi.dk just happened to be slow for.
+async function lookupCvrName(cvr: string): Promise<string | null> {
+  const cached = await prisma.cvrLookup.findUnique({ where: { cvr } }).catch(() => null);
+  if (cached) return cached.name;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), CVR_LOOKUP_TIMEOUT_MS);
+  try {
+    const res = await fetch(`https://cvrapi.dk/api?search=${cvr}&country=dk`, {
+      signal: controller.signal,
+      headers: {
+        // cvrapi.dk's usage policy asks for a descriptive User-Agent and
+        // blocks requests that don't send one.
+        "User-Agent": "ThypiskJulia/1.0 (bilagsstyring; kontakt: revisorkurt@thypisk.dk)",
+      },
+    });
+    if (!res.ok) return null;
+    const body = await res.json().catch(() => null);
+    const name =
+      body && !body.error && typeof body.name === "string" && body.name.trim().length > 0
+        ? body.name.trim()
+        : null;
+    await prisma.cvrLookup
+      .upsert({ where: { cvr }, create: { cvr, name }, update: { name, lookedUpAt: new Date() } })
+      .catch((error) => console.error("Could not cache CVR lookup", error));
+    return name;
+  } catch (error) {
+    console.error("CVR lookup failed", error);
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function guessDateFromText(text: string): Date | null {
@@ -351,15 +427,21 @@ const EMPTY_GUESS: GuessedDetails = {
   guessedInvoiceDate: null,
 };
 
-function buildGuessFromText(text: string): GuessedDetails {
+async function buildGuessFromText(text: string): Promise<GuessedDetails> {
   const amountMatch = guessAmountFromText(text);
+  const cvr = extractCvrNumber(text);
+  // The registered company name for a matched CVR number is trustworthy
+  // enough to prefer outright — it's an actual lookup, not a guess — but a
+  // CVR number is Danish-only, so foreign vendors (SaaS subscriptions,
+  // overseas suppliers) always fall back to reading a line off the text.
+  const cvrName = cvr ? await lookupCvrName(cvr) : null;
   return {
     // No currency symbol found near the number almost always means it's a
     // plain Danish invoice (kr is often implied, not spelled out in every
     // table cell) — default to DKK rather than leaving it unknown.
     guessedAmount: amountMatch?.amount ?? null,
     guessedCurrency: amountMatch ? amountMatch.currency ?? "DKK" : null,
-    guessedVendor: guessVendorFromText(text),
+    guessedVendor: cvrName ?? guessVendorFromText(text),
     guessedInvoiceDate: guessDateFromText(text),
   };
 }
