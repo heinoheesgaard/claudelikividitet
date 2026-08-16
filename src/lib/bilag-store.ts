@@ -27,7 +27,7 @@ export async function storeBilag(input: NormalizedBilag) {
     return { bilagId: existing.id, skipped: true, attachments: 0 };
   }
 
-  const { guessedAmount, guessedCurrency, guessedVendor, guessedInvoiceDate } =
+  const { guessedAmount, guessedCurrency, guessedVendor, guessedCvr, guessedInvoiceDate } =
     await guessInvoiceDetails(input.attachments, input.bodyText);
 
   try {
@@ -44,6 +44,7 @@ export async function storeBilag(input: NormalizedBilag) {
         guessedAmount,
         guessedCurrency,
         guessedVendor,
+        guessedCvr,
         guessedInvoiceDate,
         attachments: {
           create: input.attachments,

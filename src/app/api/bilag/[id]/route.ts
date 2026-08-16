@@ -43,6 +43,30 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
   const { amount, date, type, description, categoryId, businessAreaId } = parsed.data;
 
+  // A description that differs from what Julia guessed is a deliberate
+  // correction — most often the CVR-registered legal name ("A/S G.
+  // Hillgaard") swapped for the trade name a human actually recognizes
+  // ("MENY Vorupør"). Remember it against the CVR number so every other
+  // bilag from the same vendor — including ones already booked, reconciled,
+  // or ignored before this correction — picks it up too, not just future
+  // ones.
+  const correctedDescription = description?.trim();
+  if (
+    bilag.guessedCvr &&
+    correctedDescription &&
+    correctedDescription !== (bilag.guessedVendor ?? "").trim()
+  ) {
+    await prisma.cvrLookup.upsert({
+      where: { cvr: bilag.guessedCvr },
+      create: { cvr: bilag.guessedCvr, name: null, alias: correctedDescription },
+      update: { alias: correctedDescription },
+    });
+    await prisma.bilag.updateMany({
+      where: { guessedCvr: bilag.guessedCvr },
+      data: { guessedVendor: correctedDescription },
+    });
+  }
+
   const transaction = await prisma.transaction.create({
     data: {
       date: date ?? bilag.receivedAt,

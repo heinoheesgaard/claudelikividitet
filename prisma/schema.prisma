@@ -70,6 +70,7 @@ model Bilag {
   snippet           String?
   bodyText          String?
   guessedVendor     String?
+  guessedCvr        String?
   guessedAmount     Float?
   guessedCurrency   String?
   guessedInvoiceDate DateTime?
@@ -81,6 +82,7 @@ model Bilag {
 
   @@index([status])
   @@index([receivedAt])
+  @@index([guessedCvr])
 }
 
 model BilagAttachment {
@@ -103,6 +105,12 @@ model CvrLookup {
   id         String   @id @default(cuid())
   cvr        String   @unique
   name       String?
+  // The user's own correction of the registered legal name — e.g. the
+  // recognizable trade name ("MENY Vorupør") in place of the legal entity
+  // behind it ("A/S G. Hillgaard") — set once and preferred over `name` for
+  // every bilag sharing this CVR from then on, including ones already
+  // booked before the correction was made.
+  alias      String?
   lookedUpAt DateTime @default(now())
 }
 

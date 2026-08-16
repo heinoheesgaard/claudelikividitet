@@ -47,6 +47,7 @@ export type Bilag = {
   snippet: string | null;
   bodyText: string | null;
   guessedVendor: string | null;
+  guessedCvr: string | null;
   guessedAmount: number | null;
   guessedCurrency: string | null;
   guessedInvoiceDate: string | null;

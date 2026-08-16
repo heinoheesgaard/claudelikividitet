@@ -110,6 +110,7 @@ export async function POST(request: NextRequest) {
           result &&
           (result.guessedAmount !== null ||
             result.guessedVendor !== null ||
+            result.guessedCvr !== null ||
             result.guessedInvoiceDate !== null)
         ) {
           await prisma.bilag.update({
@@ -118,6 +119,7 @@ export async function POST(request: NextRequest) {
               guessedAmount: result.guessedAmount,
               guessedCurrency: result.guessedCurrency,
               guessedVendor: result.guessedVendor,
+              guessedCvr: result.guessedCvr,
               guessedInvoiceDate: result.guessedInvoiceDate,
             },
           });

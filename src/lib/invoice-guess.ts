@@ -376,9 +376,15 @@ const CVR_LOOKUP_TIMEOUT_MS = 5_000;
 // failed *request* (network error, timeout, rate limit) is deliberately
 // left uncached so it gets retried on the next receipt instead of
 // permanently giving up on a vendor cvrapi.dk just happened to be slow for.
-async function lookupCvrName(cvr: string): Promise<string | null> {
+//
+// The registered legal name is often not the name a human recognizes — a
+// local supermarket franchise is routinely registered under a completely
+// different owning company. Once someone corrects it once (see the "confirm"
+// route, which writes `alias`), that correction wins over the registry name
+// for every future receipt from the same CVR, not just this one.
+async function resolveVendorNameForCvr(cvr: string): Promise<string | null> {
   const cached = await prisma.cvrLookup.findUnique({ where: { cvr } }).catch(() => null);
-  if (cached) return cached.name;
+  if (cached) return cached.alias ?? cached.name;
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), CVR_LOOKUP_TIMEOUT_MS);
@@ -428,6 +434,7 @@ type GuessedDetails = {
   guessedAmount: number | null;
   guessedCurrency: string | null;
   guessedVendor: string | null;
+  guessedCvr: string | null;
   guessedInvoiceDate: Date | null;
 };
 
@@ -435,24 +442,31 @@ const EMPTY_GUESS: GuessedDetails = {
   guessedAmount: null,
   guessedCurrency: null,
   guessedVendor: null,
+  guessedCvr: null,
   guessedInvoiceDate: null,
 };
 
 async function buildGuessFromText(text: string): Promise<GuessedDetails> {
   const amountMatch = guessAmountFromText(text);
   const cvr = extractCvrNumber(text);
-  // The registered company name for a matched CVR number is trustworthy
-  // enough to prefer outright — it's an actual lookup, not a guess — but a
-  // CVR number is Danish-only, so foreign vendors (SaaS subscriptions,
-  // overseas suppliers) always fall back to reading a line off the text.
-  const cvrName = cvr ? await lookupCvrName(cvr) : null;
+  // The registered (or user-corrected) name for a matched CVR number is
+  // trustworthy enough to prefer outright — it's an actual lookup, not a
+  // guess — but a CVR number is Danish-only, so foreign vendors (SaaS
+  // subscriptions, overseas suppliers) always fall back to reading a line
+  // off the text.
+  const cvrVendorName = cvr ? await resolveVendorNameForCvr(cvr) : null;
   return {
     // No currency symbol found near the number almost always means it's a
     // plain Danish invoice (kr is often implied, not spelled out in every
     // table cell) — default to DKK rather than leaving it unknown.
     guessedAmount: amountMatch?.amount ?? null,
     guessedCurrency: amountMatch ? amountMatch.currency ?? "DKK" : null,
-    guessedVendor: cvrName ?? guessVendorFromText(text),
+    guessedVendor: cvrVendorName ?? guessVendorFromText(text),
+    // Kept even when no name/alias was resolved — it's still what lets a
+    // later correction (see the "confirm" route) find every other bilag
+    // from the same vendor to backfill, whether or not this specific guess
+    // found a usable name for it.
+    guessedCvr: cvr,
     guessedInvoiceDate: guessDateFromText(text),
   };
 }
