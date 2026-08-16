@@ -1,8 +1,9 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { formatDKK, formatDate } from "@/lib/format";
 import { parseRawBankCsvText, parseRawBankXlsxRows } from "@/lib/bank-export-parser";
+import type { Bilag } from "@/lib/types";
 
 type MatchAttachment = {
   id: string;
@@ -71,6 +72,16 @@ export default function BilagAfstemningPage() {
   // an explicit thumbs up before it counts as confirmed.
   const [rowDecisions, setRowDecisions] = useState<Record<string, boolean>>({});
 
+  // For postings Julia's automatic matcher didn't find a bilag for, but the
+  // user found one themselves via manual search — keyed by bilagNumber
+  // (the accountant's row identifier), same key space as rowDecisions.
+  const [manualMatches, setManualMatches] = useState<Record<string, MatchCandidate>>({});
+  // Postings that genuinely never get a bilag (bank fees, interest, internal
+  // transfers) — marked so they stop showing up as "missing" without
+  // pretending a bilag exists for them.
+  const [noBilagNeeded, setNoBilagNeeded] = useState<Set<string>>(new Set());
+  const [manualSearchFor, setManualSearchFor] = useState<MatchResult | null>(null);
+
   function reset() {
     setFileName(null);
     setParseError(null);
@@ -80,6 +91,46 @@ export default function BilagAfstemningPage() {
     setConfirmError(null);
     setConfirmedSummary(null);
     setRowDecisions({});
+    setManualMatches({});
+    setNoBilagNeeded(new Set());
+    setManualSearchFor(null);
+  }
+
+  function effectiveMatches(r: MatchResult): MatchCandidate[] {
+    if (r.matches.length > 0) return r.matches;
+    const manual = manualMatches[r.bilagNumber];
+    return manual ? [manual] : [];
+  }
+
+  function attachManualMatch(bilagNumber: string, candidate: MatchCandidate) {
+    setManualMatches((prev) => ({ ...prev, [bilagNumber]: candidate }));
+    setNoBilagNeeded((prev) => {
+      if (!prev.has(bilagNumber)) return prev;
+      const next = new Set(prev);
+      next.delete(bilagNumber);
+      return next;
+    });
+    setManualSearchFor(null);
+  }
+
+  function removeManualMatch(bilagNumber: string) {
+    setManualMatches((prev) => {
+      const next = { ...prev };
+      delete next[bilagNumber];
+      return next;
+    });
+  }
+
+  function toggleNoBilagNeeded(bilagNumber: string) {
+    setNoBilagNeeded((prev) => {
+      const next = new Set(prev);
+      if (next.has(bilagNumber)) {
+        next.delete(bilagNumber);
+      } else {
+        next.add(bilagNumber);
+      }
+      return next;
+    });
   }
 
   async function handleFile(file: File) {
@@ -90,6 +141,9 @@ export default function BilagAfstemningPage() {
     setConfirmError(null);
     setConfirmedSummary(null);
     setRowDecisions({});
+    setManualMatches({});
+    setNoBilagNeeded(new Set());
+    setManualSearchFor(null);
     setFileName(file.name);
     setLoading(true);
     try {
@@ -258,11 +312,12 @@ export default function BilagAfstemningPage() {
     setRowDecisions((prev) => ({ ...prev, [bilagNumber]: decision }));
   }
 
-  const notFound = results?.filter((r) => r.matches.length === 0) ?? [];
-  const found = results?.filter((r) => r.matches.length > 0) ?? [];
+  const found = results?.filter((r) => effectiveMatches(r).length > 0) ?? [];
+  const notFound =
+    results?.filter((r) => effectiveMatches(r).length === 0 && !noBilagNeeded.has(r.bilagNumber)) ?? [];
   const confirmedRows = found.filter((r) => rowDecisions[r.bilagNumber] !== false);
   const rejectedCount = found.length - confirmedRows.length;
-  const bestMatchBilagIds = [...new Set(confirmedRows.map((r) => r.matches[0].bilagId))];
+  const bestMatchBilagIds = [...new Set(confirmedRows.map((r) => effectiveMatches(r)[0].bilagId))];
   const sortedResults = [...(results ?? [])].sort((a, b) => a.date.localeCompare(b.date));
 
   const phase: Phase = confirmedSummary ? "done" : results ? "review" : "upload";
@@ -320,6 +375,7 @@ export default function BilagAfstemningPage() {
           <SummaryCards
             foundCount={found.length}
             notFoundCount={notFound.length}
+            noBilagNeededCount={noBilagNeeded.size}
             unmatchedCount={unmatchedBilag?.length ?? 0}
           />
 
@@ -369,10 +425,16 @@ export default function BilagAfstemningPage() {
                 </thead>
                 <tbody>
                   {sortedResults.map((r) => {
-                    const m = r.matches[0];
+                    const isManual = r.matches.length === 0 && !!manualMatches[r.bilagNumber];
+                    const ms = effectiveMatches(r);
+                    const m = ms[0];
                     if (!m) {
+                      const skipped = noBilagNeeded.has(r.bilagNumber);
                       return (
-                        <tr key={r.bilagNumber} className="border-b border-slate-100 bg-amber-50/50">
+                        <tr
+                          key={r.bilagNumber}
+                          className={`border-b border-slate-100 ${skipped ? "bg-slate-50" : "bg-amber-50/50"}`}
+                        >
                           <td className="py-2 pl-4 pr-3 whitespace-nowrap text-slate-500">
                             {formatDate(r.date)}
                           </td>
@@ -383,10 +445,44 @@ export default function BilagAfstemningPage() {
                             {formatDKK(r.amount)}
                           </td>
                           <td
-                            colSpan={4}
-                            className="py-2 pr-4 pl-3 border-l border-slate-200 text-amber-700 text-xs font-medium"
+                            colSpan={3}
+                            className="py-2 pr-3 pl-3 border-l border-slate-200 text-xs font-medium"
                           >
-                            ❌ Mangler bilag
+                            {skipped ? (
+                              <span className="text-slate-500">➖ Intet bilag nødvendigt</span>
+                            ) : (
+                              <span className="text-amber-700">❌ Mangler bilag</span>
+                            )}
+                          </td>
+                          <td className="py-2 pr-4">
+                            <div className="flex items-center justify-center gap-1">
+                              {skipped ? (
+                                <button
+                                  onClick={() => toggleNoBilagNeeded(r.bilagNumber)}
+                                  title="Fortryd — den mangler alligevel et bilag"
+                                  className="text-xs text-slate-500 hover:underline whitespace-nowrap"
+                                >
+                                  ↩ Fortryd
+                                </button>
+                              ) : (
+                                <>
+                                  <button
+                                    onClick={() => setManualSearchFor(r)}
+                                    title="Søg i arkivet efter det rigtige bilag"
+                                    className="text-xs text-blue-600 hover:underline whitespace-nowrap"
+                                  >
+                                    🔍 Find
+                                  </button>
+                                  <button
+                                    onClick={() => toggleNoBilagNeeded(r.bilagNumber)}
+                                    title="Denne postering får aldrig et bilag (fx bankgebyr)"
+                                    className="text-xs text-slate-500 hover:underline whitespace-nowrap"
+                                  >
+                                    Ingen
+                                  </button>
+                                </>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       );
@@ -414,8 +510,9 @@ export default function BilagAfstemningPage() {
                         </td>
                         <td
                           className="py-2 pr-3 pl-3 border-l border-slate-200 text-slate-900 truncate"
-                          title={m.subject}
+                          title={isManual ? `Manuelt valgt · ${m.subject}` : m.subject}
                         >
+                          {isManual && <span title="Manuelt valgt">🖐️ </span>}
                           {m.subject}
                         </td>
                         <td
@@ -467,8 +564,12 @@ export default function BilagAfstemningPage() {
                               ✓
                             </button>
                             <button
-                              onClick={() => setRowDecision(r.bilagNumber, false)}
-                              title="Nej, forkert match"
+                              onClick={() =>
+                                isManual
+                                  ? removeManualMatch(r.bilagNumber)
+                                  : setRowDecision(r.bilagNumber, false)
+                              }
+                              title={isManual ? "Fjern det manuelle valg" : "Nej, forkert match"}
                               className={`w-7 h-7 rounded-md text-sm border ${
                                 !decision
                                   ? "bg-red-600 text-white border-red-600"
@@ -583,6 +684,14 @@ export default function BilagAfstemningPage() {
           </button>
         </section>
       )}
+
+      {manualSearchFor && (
+        <ManualMatchModal
+          row={manualSearchFor}
+          onClose={() => setManualSearchFor(null)}
+          onSelect={(candidate) => attachManualMatch(manualSearchFor.bilagNumber, candidate)}
+        />
+      )}
     </div>
   );
 }
@@ -626,19 +735,22 @@ function Stepper({ phase }: { phase: Phase }) {
 function SummaryCards({
   foundCount,
   notFoundCount,
+  noBilagNeededCount,
   unmatchedCount,
 }: {
   foundCount: number;
   notFoundCount: number;
+  noBilagNeededCount: number;
   unmatchedCount: number;
 }) {
   const cards = [
     { emoji: "✅", label: "Fundet", value: foundCount, color: "text-emerald-700" },
     { emoji: "❌", label: "Mangler stadig", value: notFoundCount, color: "text-amber-700" },
+    { emoji: "➖", label: "Intet bilag nødvendigt", value: noBilagNeededCount, color: "text-slate-500" },
     { emoji: "🗄️", label: "Kan ryddes op", value: unmatchedCount, color: "text-slate-500" },
   ];
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+    <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
       {cards.map((c) => (
         <div key={c.label} className="bg-white border border-slate-200 rounded-lg p-4 text-center">
           <p className="text-2xl">{c.emoji}</p>
@@ -711,5 +823,191 @@ function UploadZone({
         </p>
       )}
     </section>
+  );
+}
+
+function addDays(isoDate: string, days: number): string {
+  const d = new Date(`${isoDate}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+function ManualMatchModal({
+  row,
+  onClose,
+  onSelect,
+}: {
+  row: MatchResult;
+  onClose: () => void;
+  onSelect: (candidate: MatchCandidate) => void;
+}) {
+  const [dateFrom, setDateFrom] = useState(addDays(row.date, -7));
+  const [dateTo, setDateTo] = useState(addDays(row.date, 7));
+  const [amount, setAmount] = useState(Math.abs(row.amount).toFixed(2));
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [results, setResults] = useState<Bilag[] | null>(null);
+
+  async function search() {
+    setError(null);
+    setLoading(true);
+    setResults(null);
+    try {
+      const params = new URLSearchParams();
+      if (dateFrom) params.set("dateFrom", dateFrom);
+      if (dateTo) params.set("dateTo", dateTo);
+      if (amount) params.set("amount", amount);
+      const res = await fetch(`/api/bilag/search?${params.toString()}`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setError(body.error ?? "Søgningen fejlede.");
+        setLoading(false);
+        return;
+      }
+      setResults(await res.json());
+    } catch {
+      setError("Der skete en fejl under søgningen.");
+    }
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    search();
+    // Only search once on open with the prefilled values — further searches
+    // happen when the user explicitly clicks "Søg" again.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-lg p-5 max-w-2xl w-full max-h-[85vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-4 mb-4">
+          <div>
+            <h3 className="text-base font-semibold text-slate-900">Find bilag manuelt</h3>
+            <p className="text-sm text-slate-500 mt-0.5">
+              Til posteringen &quot;{row.text}&quot;, {formatDate(row.date)},{" "}
+              {formatDKK(row.amount)}
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-slate-400 hover:text-slate-600 text-lg leading-none"
+            title="Luk"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div className="flex flex-wrap items-end gap-3 mb-4">
+          <label className="flex flex-col gap-1 text-xs">
+            <span className="text-slate-500">Fra dato</span>
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              className="border border-slate-300 rounded-md px-2 py-1.5 text-sm text-slate-900"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-xs">
+            <span className="text-slate-500">Til dato</span>
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              className="border border-slate-300 rounded-md px-2 py-1.5 text-sm text-slate-900"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-xs">
+            <span className="text-slate-500">Beløb (DKK)</span>
+            <input
+              type="number"
+              step="0.01"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              className="border border-slate-300 rounded-md px-2 py-1.5 text-sm w-32 text-slate-900"
+            />
+          </label>
+          <button
+            onClick={search}
+            disabled={loading}
+            className="bg-slate-900 text-white rounded-md px-4 py-1.5 text-sm font-medium disabled:opacity-50"
+          >
+            {loading ? "Søger…" : "Søg"}
+          </button>
+        </div>
+
+        {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
+
+        {results && (
+          <div className="flex flex-col gap-2">
+            <p className="text-xs text-slate-500">{results.length} bilag fundet.</p>
+            {results.length === 0 ? (
+              <p className="text-sm text-slate-500">
+                Ingen bilag matcher søgningen. Prøv en bredere dato- eller beløbsramme.
+              </p>
+            ) : (
+              results.map((b) => (
+                <div
+                  key={b.id}
+                  className="flex flex-wrap items-center justify-between gap-2 border border-slate-200 rounded-md p-3 text-sm"
+                >
+                  <div>
+                    <span className="font-medium text-slate-900">{b.guessedVendor ?? b.subject}</span>
+                    <span className="text-slate-500">
+                      {" "}
+                      · modtaget {formatDate(b.receivedAt)}
+                      {b.guessedInvoiceDate && ` · faktura ${formatDate(b.guessedInvoiceDate)}`}
+                      {b.guessedAmount != null &&
+                        ` · ${formatDKK(b.guessedAmount)}${
+                          b.guessedCurrency && b.guessedCurrency !== "DKK" ? ` ${b.guessedCurrency}` : ""
+                        }`}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {b.attachments.map((a) => (
+                      <a
+                        key={a.id}
+                        href={`/api/bilag/attachments/${a.id}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="text-blue-600 hover:underline text-xs"
+                      >
+                        📎 {a.filename}
+                      </a>
+                    ))}
+                    <button
+                      onClick={() =>
+                        onSelect({
+                          bilagId: b.id,
+                          subject: b.subject,
+                          senderEmail: b.senderEmail,
+                          receivedAt: b.receivedAt,
+                          guessedInvoiceDate: b.guessedInvoiceDate,
+                          guessedAmount: b.guessedAmount,
+                          guessedCurrency: b.guessedCurrency,
+                          status: b.status,
+                          score: -1,
+                          attachments: b.attachments,
+                        })
+                      }
+                      className="bg-slate-900 text-white rounded-md px-3 py-1.5 text-xs font-medium whitespace-nowrap"
+                    >
+                      Vælg
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
