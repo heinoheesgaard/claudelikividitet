@@ -65,7 +65,15 @@ const WEAK_LABELS = ["beløb", "sum"];
 // fallback when OCR on a photographed receipt garbles the digits right
 // after the "at betale" line itself (the label text survives more often
 // than the tightly-kerned number next to it).
-const PAYMENT_LABELS = ["dankort", "kontant", "mobilepay", "visa", "mastercard", "girocard"];
+const PAYMENT_LABELS = [
+  "dankort",
+  "kontant",
+  "mobilepay",
+  "visa",
+  "mastercard",
+  "girocard",
+  "betalingskort",
+];
 const DATE_RE = /\b(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})\b/g;
 
 // Matches a money amount in either Danish (1.234,56) or international
@@ -140,9 +148,12 @@ function isLabelOnlyLine(line: string): boolean {
 
 function findLabeledAmounts(text: string, labels: string[]): AmountMatch[] {
   // \b boundaries stop "total" from matching inside "subtotal", or "beløb"
-  // inside "nettobeløb".
+  // inside "nettobeløb". Multi-word labels allow the space to have been
+  // dropped entirely ("IALT" for "i alt") — a common OCR artifact on
+  // tightly-kerned thermal receipts — without allowing any other character
+  // in its place, so this only closes that one specific gap.
   const labelPattern = new RegExp(
-    `\\b(${labels.map((l) => l.replace(/\s+/g, "\\s+")).join("|")})\\b`,
+    `\\b(${labels.map((l) => l.replace(/\s+/g, "\\s*")).join("|")})\\b`,
     "i",
   );
 
