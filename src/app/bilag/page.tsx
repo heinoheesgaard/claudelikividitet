@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
 import { fetcher, formatDKK, formatDate } from "@/lib/format";
 import type { Bilag, BilagStatus, BusinessArea, Category } from "@/lib/types";
@@ -240,44 +240,82 @@ function FetchBilagButton({ onDone }: { onDone: () => void }) {
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const stoppedRef = useRef(false);
+
+  // Polls for progress purely to update this button's UI — the hentning
+  // itself runs entirely server-side (see src/lib/sync-job.ts, which chains
+  // itself via `after()`), so it keeps going to completion whether or not
+  // this poll loop is even still running. Losing the poll (closing the tab,
+  // navigating away) never stops the actual work.
+  async function poll() {
+    stoppedRef.current = false;
+    while (!stoppedRef.current) {
+      let job: { active: boolean; totalProcessed: number; totalCreated: number; error: string | null } | null;
+      try {
+        const res = await fetch("/api/bilag/sync-job/status");
+        if (!res.ok) return;
+        job = (await res.json()).job;
+      } catch {
+        return;
+      }
+      if (!job) return;
+      if (job.error) {
+        setError(job.error);
+        setRunning(false);
+        return;
+      }
+      setProgress(`${job.totalProcessed} mails gennemgået, ${job.totalCreated} nye bilag fundet…`);
+      onDone();
+      if (!job.active) {
+        setProgress(`Færdig — ${job.totalProcessed} mails gennemgået, ${job.totalCreated} nye bilag fundet.`);
+        setRunning(false);
+        return;
+      }
+      setRunning(true);
+      await new Promise((resolve) => setTimeout(resolve, 2500));
+    }
+  }
+
+  useEffect(() => {
+    // Pick up an already-running job on mount — e.g. you navigated away and
+    // came back; it kept going on the server the whole time.
+    (async () => {
+      try {
+        const res = await fetch("/api/bilag/sync-job/status");
+        if (!res.ok) return;
+        const job = (await res.json()).job;
+        if (job?.active) poll();
+      } catch {
+        // Ignore — the button just starts fresh if asked.
+      }
+    })();
+    return () => {
+      stoppedRef.current = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function run() {
     setRunning(true);
     setError(null);
     setProgress("Henter…");
-
-    let pageToken: string | undefined;
-    let totalCreated = 0;
-    let totalProcessed = 0;
-
     try {
-      while (true) {
-        const res = await fetch("/api/bilag/sync", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ days: Number(days) || 14, pageToken }),
-        });
-        if (!res.ok) {
-          const body = await res.json().catch(() => ({}));
-          setError(body.error ?? "Kunne ikke hente bilag.");
-          break;
-        }
-        const body = await res.json();
-        totalCreated += body.created;
-        totalProcessed += body.processed;
-        setProgress(`${totalProcessed} mails gennemgået, ${totalCreated} nye bilag fundet…`);
-        onDone();
-
-        if (!body.nextPageToken) {
-          setProgress(`Færdig — ${totalProcessed} mails gennemgået, ${totalCreated} nye bilag fundet.`);
-          break;
-        }
-        pageToken = body.nextPageToken;
+      const res = await fetch("/api/bilag/sync-job/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ days: Number(days) || 14 }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setError(body.error ?? "Kunne ikke hente bilag.");
+        setRunning(false);
+        return;
       }
+      poll();
     } catch {
       setError("Der skete en fejl under hentning.");
+      setRunning(false);
     }
-    setRunning(false);
   }
 
   return (
@@ -305,6 +343,11 @@ function FetchBilagButton({ onDone }: { onDone: () => void }) {
       </div>
       {progress && <p className="text-xs text-slate-500">{progress}</p>}
       {error && <p className="text-xs text-red-600">{error}</p>}
+      {running && (
+        <p className="text-[11px] text-slate-400">
+          Fortsætter i baggrunden selvom du forlader eller lukker siden.
+        </p>
+      )}
     </div>
   );
 }

@@ -146,6 +146,26 @@ model CvrLookup {
   lookedUpAt DateTime @default(now())
 }
 
+// A large manual "Hent bilag nu" run can span far more pages than a single
+// serverless invocation's time limit allows. Persisting progress here lets
+// the server resume itself (see src/lib/sync-job.ts) purely by chaining
+// requests to itself with `after()`, so the job keeps going to completion
+// regardless of whether the browser that started it is still open,
+// foregrounded, or even on the same continent.
+model SyncJob {
+  id             String   @id @default(cuid())
+  days           Int
+  pageToken      String?
+  totalCreated   Int      @default(0)
+  totalProcessed Int      @default(0)
+  active         Boolean  @default(true)
+  error          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([active])
+}
+
 model LoginAttempt {
   id          String   @id @default(cuid())
   ipAddress   String

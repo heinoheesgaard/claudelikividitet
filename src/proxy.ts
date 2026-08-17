@@ -7,6 +7,10 @@ const PUBLIC_PATHS = [
   "/api/bilag/inbound",
   "/api/bilag/ingest",
   "/api/cron/sync-bilag",
+  // Called by the server itself (see src/lib/sync-job.ts) to chain the next
+  // burst of a long-running Gmail sync — never by a browser, so it checks
+  // its own bearer secret rather than carrying a session cookie.
+  "/api/bilag/sync-job/continue",
 ];
 
 export async function proxy(request: NextRequest) {
