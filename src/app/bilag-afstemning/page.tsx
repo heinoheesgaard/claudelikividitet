@@ -62,6 +62,7 @@ export default function BilagAfstemningPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
   const [manualSearchFor, setManualSearchFor] = useState<MatchedRow | null>(null);
+  const [previewAttachment, setPreviewAttachment] = useState<MatchAttachment | null>(null);
 
   const [ignoreSelection, setIgnoreSelection] = useState<Set<string>>(new Set());
   const [ignoring, setIgnoring] = useState(false);
@@ -529,16 +530,14 @@ export default function BilagAfstemningPage() {
                           {m.attachments.length > 0 ? (
                             <div className="flex flex-col gap-0.5">
                               {m.attachments.map((a) => (
-                                <a
+                                <button
                                   key={a.id}
-                                  href={`/api/bilag/attachments/${a.id}`}
-                                  target="_blank"
-                                  rel="noreferrer"
+                                  onClick={() => setPreviewAttachment(a)}
                                   title={a.filename}
-                                  className="text-blue-600 hover:underline truncate block"
+                                  className="text-blue-600 hover:underline truncate block text-left"
                                 >
                                   📎 {a.filename}
-                                </a>
+                                </button>
                               ))}
                             </div>
                           ) : (
@@ -690,6 +689,14 @@ export default function BilagAfstemningPage() {
           row={manualSearchFor}
           onClose={() => setManualSearchFor(null)}
           onSelect={(bilagId) => confirmRow(manualSearchFor.id, bilagId)}
+          onPreview={setPreviewAttachment}
+        />
+      )}
+
+      {previewAttachment && (
+        <AttachmentPreviewModal
+          attachment={previewAttachment}
+          onClose={() => setPreviewAttachment(null)}
         />
       )}
     </div>
@@ -813,10 +820,12 @@ function ManualMatchModal({
   row,
   onClose,
   onSelect,
+  onPreview,
 }: {
   row: MatchedRow;
   onClose: () => void;
   onSelect: (bilagId: string) => void;
+  onPreview: (attachment: MatchAttachment) => void;
 }) {
   // The auto-matcher already covers close date+amount matches within a
   // tight window around the posting's own date — so a manual search using
@@ -969,16 +978,16 @@ function ManualMatchModal({
                   </div>
                   <div className="flex items-center gap-2">
                     {b.attachments.map((a) => (
-                      <a
+                      <button
                         key={a.id}
-                        href={`/api/bilag/attachments/${a.id}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        onClick={(e) => e.stopPropagation()}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onPreview(a);
+                        }}
                         className="text-blue-600 hover:underline text-xs"
                       >
                         📎 {a.filename}
-                      </a>
+                      </button>
                     ))}
                     <button
                       onClick={() => onSelect(b.id)}
@@ -992,6 +1001,75 @@ function ManualMatchModal({
             )}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+const PREVIEWABLE_IMAGE_RE = /\.(jpe?g|png|gif|webp|heic|bmp)$/i;
+const PREVIEWABLE_PDF_RE = /\.pdf$/i;
+
+function AttachmentPreviewModal({
+  attachment,
+  onClose,
+}: {
+  attachment: MatchAttachment;
+  onClose: () => void;
+}) {
+  const url = `/api/bilag/attachments/${attachment.id}`;
+  const isImage = PREVIEWABLE_IMAGE_RE.test(attachment.filename);
+  const isPdf = PREVIEWABLE_PDF_RE.test(attachment.filename);
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-lg p-4 max-w-3xl w-full max-h-[90vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between gap-4 mb-3">
+          <p className="text-sm font-medium text-slate-900 truncate" title={attachment.filename}>
+            📎 {attachment.filename}
+          </p>
+          <div className="flex items-center gap-3 shrink-0">
+            <a
+              href={url}
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs text-blue-600 hover:underline whitespace-nowrap"
+            >
+              Åbn i nyt vindue ↗
+            </a>
+            <button
+              onClick={onClose}
+              className="text-slate-400 hover:text-slate-600 text-lg leading-none"
+              title="Luk"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+        <div className="flex-1 overflow-auto flex items-center justify-center bg-slate-50 rounded-md min-h-[300px]">
+          {isImage ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={url}
+              alt={attachment.filename}
+              className="max-w-full max-h-[75vh] object-contain"
+            />
+          ) : isPdf ? (
+            <iframe src={url} title={attachment.filename} className="w-full h-[75vh]" />
+          ) : (
+            <div className="p-8 text-center text-sm text-slate-500">
+              <p className="mb-3">Denne filtype kan ikke vises direkte her.</p>
+              <a href={url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">
+                Åbn filen i nyt vindue ↗
+              </a>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
