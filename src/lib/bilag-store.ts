@@ -1,6 +1,7 @@
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { guessInvoiceDetails } from "@/lib/invoice-guess";
+import { uploadAttachmentToBlob } from "@/lib/blob-storage";
 
 export type NormalizedAttachment = {
   filename: string;
@@ -30,6 +31,18 @@ export async function storeBilag(input: NormalizedBilag) {
   const { guessedAmount, guessedCurrency, guessedVendor, guessedCvr, guessedInvoiceDate } =
     await guessInvoiceDetails(input.attachments, input.bodyText);
 
+  // Uploaded to Blob storage up front, outside the Bilag.create() call —
+  // storing the raw bytes in Postgres instead is what blew through Neon's
+  // free-tier monthly network transfer allowance (every read AND write sent
+  // the full file through the database connection).
+  const attachmentsWithBlob = await Promise.all(
+    input.attachments.map(async (a) => ({
+      filename: a.filename,
+      contentType: a.contentType,
+      blobPathname: await uploadAttachmentToBlob(a.filename, a.data, a.contentType),
+    })),
+  );
+
   try {
     const bilag = await prisma.bilag.create({
       data: {
@@ -47,7 +60,7 @@ export async function storeBilag(input: NormalizedBilag) {
         guessedCvr,
         guessedInvoiceDate,
         attachments: {
-          create: input.attachments,
+          create: attachmentsWithBlob,
         },
       },
     });

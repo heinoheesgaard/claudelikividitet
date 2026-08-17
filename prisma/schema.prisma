@@ -92,8 +92,14 @@ model BilagAttachment {
   bilagId     String
   filename    String
   contentType String
-  data        Bytes
-  createdAt   DateTime @default(now())
+  // Historically the raw file lived here — every read and write sent the
+  // full bytes through the Postgres connection, which is what blew through
+  // Neon's free-tier monthly network transfer allowance. New attachments go
+  // to Vercel Blob instead (blobPathname set, data left null); attachments
+  // stored before this change keep their bytes here until backfilled.
+  data         Bytes?
+  blobPathname String?
+  createdAt    DateTime @default(now())
 
   @@index([bilagId])
 }

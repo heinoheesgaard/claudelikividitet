@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { guessInvoiceDetails } from "@/lib/invoice-guess";
 import { refetchBodyTextByMessageId } from "@/lib/gmail-sync";
+import { resolveAttachmentBytes } from "@/lib/blob-storage";
 
 export const maxDuration = 60;
 
@@ -53,7 +54,9 @@ export async function POST(request: NextRequest) {
         take: PAGE_SIZE,
         ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
         include: {
-          attachments: { select: { filename: true, contentType: true, data: true } },
+          attachments: {
+            select: { filename: true, contentType: true, data: true, blobPathname: true },
+          },
         },
       });
 
@@ -68,11 +71,13 @@ export async function POST(request: NextRequest) {
           break outer;
         }
 
-        const attachments = bilag.attachments.map((a) => ({
-          filename: a.filename,
-          contentType: a.contentType,
-          data: new Uint8Array(a.data) as Uint8Array<ArrayBuffer>,
-        }));
+        const attachments = await Promise.all(
+          bilag.attachments.map(async (a) => ({
+            filename: a.filename,
+            contentType: a.contentType,
+            data: new Uint8Array(await resolveAttachmentBytes(a)) as Uint8Array<ArrayBuffer>,
+          })),
+        );
 
         // Bilag stored before body-text capture existed have no bodyText to
         // fall back on and never will unless we go fetch it — re-run "Gæt

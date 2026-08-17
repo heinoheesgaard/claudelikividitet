@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import JSZip from "jszip";
 import { prisma } from "@/lib/prisma";
+import { resolveAttachmentBytes } from "@/lib/blob-storage";
 
 function sanitize(name: string): string {
   return name.replace(/[\\/:*?"<>|]/g, "_").trim().slice(0, 60) || "bilag";
@@ -37,7 +38,7 @@ export async function POST(request: NextRequest) {
 
     const folder = zip.folder(folderName);
     for (const attachment of bilag.attachments) {
-      folder?.file(sanitize(attachment.filename), Buffer.from(attachment.data));
+      folder?.file(sanitize(attachment.filename), await resolveAttachmentBytes(attachment));
     }
   }
 

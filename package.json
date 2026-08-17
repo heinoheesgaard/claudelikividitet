@@ -9,11 +9,13 @@
     "lint": "eslint",
     "postinstall": "prisma generate",
     "db:migrate": "prisma migrate dev",
-    "db:seed": "tsx prisma/seed.ts"
+    "db:seed": "tsx prisma/seed.ts",
+    "backfill:attachments": "tsx prisma/backfill-attachment-blobs.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.9.1",
     "@prisma/client": "^7.9.1",
+    "@vercel/blob": "^2.8.0",
     "googleapis": "^174.0.0",
     "jose": "^6.2.8",
     "jszip": "^3.10.1",

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { bilagConfirmSchema } from "@/lib/bilag-schema";
+import { deleteAttachmentFromBlob } from "@/lib/blob-storage";
 
 const patchSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("confirm") }).extend(bilagConfirmSchema.shape),
@@ -91,7 +92,18 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 export async function DELETE(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   try {
-    await prisma.bilag.delete({ where: { id } });
+    const deleted = await prisma.bilag.delete({
+      where: { id },
+      include: { attachments: { select: { blobPathname: true } } },
+    });
+    // The DB row cascade-deletes the attachment rows, but not the Blob
+    // objects they pointed to — clean those up separately so deleting a
+    // bilag doesn't just leave its files orphaned in storage forever.
+    await Promise.all(
+      deleted.attachments
+        .filter((a) => a.blobPathname)
+        .map((a) => deleteAttachmentFromBlob(a.blobPathname as string).catch(() => undefined)),
+    );
     return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json({ error: "Bilaget blev ikke fundet." }, { status: 404 });

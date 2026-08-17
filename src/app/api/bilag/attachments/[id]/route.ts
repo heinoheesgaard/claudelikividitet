@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { resolveAttachmentBytes } from "@/lib/blob-storage";
 
 export async function GET(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -9,7 +10,9 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json({ error: "Vedhæftningen blev ikke fundet." }, { status: 404 });
   }
 
-  return new NextResponse(new Uint8Array(attachment.data), {
+  const bytes = await resolveAttachmentBytes(attachment);
+
+  return new NextResponse(new Uint8Array(bytes), {
     headers: {
       "Content-Type": attachment.contentType,
       "Content-Disposition": `inline; filename="${attachment.filename}"`,
