@@ -28,6 +28,19 @@ function parseDanishDateString(raw: string): Date | null {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+// The 5th column, when present, carries the counterparty's name and address
+// — the bank fills it in mainly for incoming transfers, where the "Tekst"
+// column alone is often a generic label ("Advis 122608040148104", "ADYEN
+// NV") that doesn't say who actually paid. Folding it into `text` makes
+// that name available both to a human reading the row and to the matcher's
+// word-overlap check, without needing a separate field threaded through
+// every part of the app that already just uses `text`.
+function combineTextAndInfo(baseText: string, info: string | undefined): string {
+  const trimmedInfo = (info ?? "").trim();
+  if (!trimmedInfo || trimmedInfo === baseText) return baseText;
+  return `${baseText} – ${trimmedInfo}`;
+}
+
 export function parseRawBankCsvText(text: string): ParsedBankRow[] {
   const withoutBom = text.replace(/^﻿/, "");
   const lines = withoutBom.split(/\r?\n/).filter((line) => line.trim().length > 0);
@@ -43,7 +56,7 @@ export function parseRawBankCsvText(text: string): ParsedBankRow[] {
     rows.push({
       bilagNumber: String(i + 1),
       date: date.toISOString().slice(0, 10),
-      text: (cols[1] ?? "").trim(),
+      text: combineTextAndInfo((cols[1] ?? "").trim(), cols[4]),
       amount,
     });
   });
@@ -71,7 +84,7 @@ export function parseRawBankXlsxRows(raw: unknown[][]): ParsedBankRow[] {
     rows.push({
       bilagNumber: String(i + 1),
       date: date.toISOString().slice(0, 10),
-      text: String(r[1] ?? "").trim(),
+      text: combineTextAndInfo(String(r[1] ?? "").trim(), r[4] != null ? String(r[4]) : undefined),
       amount,
     });
   });
