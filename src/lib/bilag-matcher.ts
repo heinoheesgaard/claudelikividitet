@@ -89,7 +89,11 @@ export async function matchRowsAgainstArchive(
 
   const results: MatchedRow[] = rows.map((row) => {
     const rowDate = new Date(row.date);
-    const words = significantWords(row.text);
+    // Deduped — a word repeated in the posting text ("Aarhus, Aarhus C")
+    // must not count as two separate matches for one coincidental overlap
+    // in a candidate's haystack. That let a single shared city name (not
+    // even the vendor name) cross the "2 words overlap" bar on its own.
+    const words = [...new Set(significantWords(row.text))];
     const rowMonth = extractMentionedMonth(row.text);
 
     const scored = candidates
