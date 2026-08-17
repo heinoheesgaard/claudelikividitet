@@ -277,6 +277,7 @@ export default function BilagAfstemningPage() {
       const body = await res.json();
       setUploadMessage(
         `${body.created} nye posteringer tilføjet` +
+          (body.enriched > 0 ? `, ${body.enriched} opdateret med mere tekst` : "") +
           (body.skipped > 0 ? ` (${body.skipped} var allerede uploadet før).` : "."),
       );
       await loadPending();

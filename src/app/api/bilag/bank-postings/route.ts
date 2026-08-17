@@ -29,16 +29,43 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Ugyldig dato i en eller flere rækker." }, { status: 400 });
   }
 
-  const created = await prisma.bankPosting.createMany({
-    data: parsed.data.rows.map((r) => ({ date: new Date(r.date), text: r.text, amount: r.amount })),
-    skipDuplicates: true,
-  });
+  let created = 0;
+  let enriched = 0;
+  let skipped = 0;
 
-  return NextResponse.json({
-    ok: true,
-    created: created.count,
-    skipped: parsed.data.rows.length - created.count,
-  });
+  for (const row of parsed.data.rows) {
+    const date = new Date(row.date);
+
+    const exact = await prisma.bankPosting.findUnique({
+      where: { date_text_amount: { date, text: row.text, amount: row.amount } },
+    });
+    if (exact) {
+      skipped += 1;
+      continue;
+    }
+
+    // Same date+amount, still pending, with different (shorter) text — most
+    // likely the exact same posting, previously uploaded before a parser
+    // improvement (e.g. the bank export's counterparty-name column wasn't
+    // being read yet). Enrich the existing row in place instead of
+    // inserting a duplicate for what a human would recognize as one line.
+    // Only ever a same-length-or-longer *extension* of the existing text —
+    // never overwritten if it doesn't obviously start the same way, and
+    // never touches a posting that's already been decided.
+    const candidate = await prisma.bankPosting.findFirst({
+      where: { date, amount: row.amount, status: "PENDING", text: { not: row.text } },
+    });
+    if (candidate && row.text.startsWith(candidate.text)) {
+      await prisma.bankPosting.update({ where: { id: candidate.id }, data: { text: row.text } });
+      enriched += 1;
+      continue;
+    }
+
+    await prisma.bankPosting.create({ data: { date, text: row.text, amount: row.amount } });
+    created += 1;
+  }
+
+  return NextResponse.json({ ok: true, created, enriched, skipped });
 }
 
 // Defaults to the pending review queue (with live-computed match
