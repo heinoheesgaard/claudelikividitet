@@ -1,6 +1,6 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
-import { significantWords } from "@/lib/bilag-text";
+import { significantWords, extractMentionedMonth } from "@/lib/bilag-text";
 
 export type MatchInputRow = {
   id: string;
@@ -90,6 +90,7 @@ export async function matchRowsAgainstArchive(
   const results: MatchedRow[] = rows.map((row) => {
     const rowDate = new Date(row.date);
     const words = significantWords(row.text);
+    const rowMonth = extractMentionedMonth(row.text);
 
     const scored = candidates
       .map((c) => {
@@ -117,8 +118,19 @@ export async function matchRowsAgainstArchive(
         const score = textMatchCount + dateBonus + amountBonus;
 
         const amountKnownButWrong = amountDiff !== null && amountDiff > 5;
+
+        // A fixed recurring charge (rent, a subscription) costs exactly the
+        // same every month, so an exact amount match alone can't tell one
+        // month's invoice apart from another's — but if the posting names
+        // one month ("Husleje aug") and the candidate names a different one
+        // ("Husleje maj"), that's as hard a contradiction as a wrong
+        // amount, and vetoes the match even though the amount matches.
+        const candidateMonth = extractMentionedMonth(`${c.subject} ${c.snippet ?? ""}`);
+        const monthMismatch = rowMonth !== null && candidateMonth !== null && rowMonth !== candidateMonth;
+
         const accept =
           !amountKnownButWrong &&
+          !monthMismatch &&
           (exactAmountMatch ||
             (textMatchCount >= 1 && (amountBonus > 0 || dateBonus > 0)) ||
             textMatchCount >= 2);
