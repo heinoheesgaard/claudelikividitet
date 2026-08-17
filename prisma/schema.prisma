@@ -78,6 +78,7 @@ model Bilag {
   transaction       Transaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
   transactionId     String?      @unique
   attachments       BilagAttachment[]
+  bankPosting       BankPosting?
   createdAt         DateTime    @default(now())
 
   @@index([status])
@@ -95,6 +96,37 @@ model BilagAttachment {
   createdAt   DateTime @default(now())
 
   @@index([bilagId])
+}
+
+enum BankPostingStatus {
+  PENDING
+  CONFIRMED
+  NO_BILAG_NEEDED
+}
+
+// One row per uploaded bank statement line, persisted so reconciliation
+// survives leaving the page — upload once, come back over days or weeks and
+// pick up wherever you left off instead of re-uploading and starting over.
+model BankPosting {
+  id               String            @id @default(cuid())
+  date             DateTime
+  text             String
+  amount           Float
+  status           BankPostingStatus @default(PENDING)
+  matchedBilag     Bilag?            @relation(fields: [matchedBilagId], references: [id], onDelete: SetNull)
+  matchedBilagId   String?           @unique
+  // Bilag a human has already said "no" to for this posting — excluded from
+  // future match suggestions so rejecting one doesn't just show it again.
+  rejectedBilagIds String[]          @default([])
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  // Bank exports have no row ID of their own — this is the dedup key so
+  // re-uploading an overlapping period (this week's file includes some of
+  // last week's rows again) doesn't create duplicate postings.
+  @@unique([date, text, amount])
+  @@index([status])
+  @@index([date])
 }
 
 // Caches CVR-number → registered company name lookups against the public
