@@ -9,6 +9,7 @@ const links = [
   { href: "/transaktioner", label: "Transaktioner" },
   { href: "/bilag", label: "Bilag" },
   { href: "/bilag-afstemning", label: "Afstemning" },
+  { href: "/julia", label: "Julia" },
   { href: "/import", label: "Importér" },
   { href: "/indstillinger", label: "Indstillinger" },
 ];
