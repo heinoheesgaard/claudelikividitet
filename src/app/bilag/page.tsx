@@ -1,11 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import useSWR from "swr";
 import { fetcher, formatDKK, formatDate } from "@/lib/format";
 import type { Bilag, BilagStatus, BusinessArea, Category } from "@/lib/types";
-import type { JuliaSelection } from "@/app/julia/page";
 
 const TABS: { value: BilagStatus | "ALLE"; label: string }[] = [
   { value: "MANGLER_BELOEB", label: "Mangler beløb" },
@@ -88,7 +86,6 @@ export default function BilagPage() {
 // archive at once, no matter whether it's since been booked, reconciled, or
 // archived as ignored.
 function ArchiveSearch() {
-  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [dateFrom, setDateFrom] = useState("");
@@ -97,32 +94,6 @@ function ArchiveSearch() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<Bilag[] | null>(null);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-
-  function toggleSelected(id: string) {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-
-  function askJulia() {
-    if (!results) return;
-    const selection: JuliaSelection = results
-      .filter((b) => selectedIds.has(b.id))
-      .map((b) => ({
-        id: b.id,
-        label: b.guessedVendor ?? b.subject,
-        receivedAt: b.receivedAt,
-        amount: b.guessedAmount,
-        currency: b.guessedCurrency,
-      }));
-    if (selection.length === 0) return;
-    sessionStorage.setItem("julia-selection", JSON.stringify(selection));
-    router.push("/julia");
-  }
 
   async function search() {
     setError(null);
@@ -214,17 +185,7 @@ function ArchiveSearch() {
           {error && <p className="text-sm text-red-600">{error}</p>}
           {results && (
             <div className="flex flex-col gap-2">
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-xs text-slate-500">{results.length} bilag fundet.</p>
-                {selectedIds.size > 0 && (
-                  <button
-                    onClick={askJulia}
-                    className="bg-slate-900 text-white rounded-md px-3 py-1.5 text-xs font-medium"
-                  >
-                    🤖 Spørg Julia om de {selectedIds.size} valgte
-                  </button>
-                )}
-              </div>
+              <p className="text-xs text-slate-500">{results.length} bilag fundet.</p>
               {results.length === 0 ? (
                 <p className="text-sm text-slate-500">Ingen bilag matcher søgningen.</p>
               ) : (
@@ -233,29 +194,21 @@ function ArchiveSearch() {
                     key={b.id}
                     className="flex flex-wrap items-center justify-between gap-2 border border-slate-200 rounded-md p-3 text-sm"
                   >
-                    <div className="flex items-start gap-2">
-                      <input
-                        type="checkbox"
-                        checked={selectedIds.has(b.id)}
-                        onChange={() => toggleSelected(b.id)}
-                        className="mt-1"
-                      />
-                      <div>
-                        <span className="font-medium text-slate-900">
-                          {b.guessedVendor ?? b.subject}
-                        </span>
-                        <span className="text-slate-500">
-                          {" "}
-                          · modtaget {formatDate(b.receivedAt)}
-                          {b.guessedInvoiceDate && ` · faktura ${formatDate(b.guessedInvoiceDate)}`}
-                          {b.guessedAmount != null &&
-                            ` · ${formatDKK(b.guessedAmount)}${
-                              b.guessedCurrency && b.guessedCurrency !== "DKK"
-                                ? ` ${b.guessedCurrency}`
-                                : ""
-                            }`}
-                        </span>
-                      </div>
+                    <div>
+                      <span className="font-medium text-slate-900">
+                        {b.guessedVendor ?? b.subject}
+                      </span>
+                      <span className="text-slate-500">
+                        {" "}
+                        · modtaget {formatDate(b.receivedAt)}
+                        {b.guessedInvoiceDate && ` · faktura ${formatDate(b.guessedInvoiceDate)}`}
+                        {b.guessedAmount != null &&
+                          ` · ${formatDKK(b.guessedAmount)}${
+                            b.guessedCurrency && b.guessedCurrency !== "DKK"
+                              ? ` ${b.guessedCurrency}`
+                              : ""
+                          }`}
+                      </span>
                     </div>
                     <div className="flex items-center gap-2">
                       <StatusBadge status={b.status} />
